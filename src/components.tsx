@@ -16,13 +16,11 @@ import {
   ChevronDown,
   CircleDot,
   Clock,
-  Eye,
-  EyeOff,
+  Github,
   Hand,
   Keyboard,
   LayoutGrid,
   Loader2,
-  Lock,
   LogOut,
   MousePointer2,
   Move,
@@ -238,26 +236,17 @@ export function OfflineState({
 
 export function LoginPage({
   info,
-  onSubmit,
+  onGithubLogin,
   busy,
   error,
   health,
 }: {
   info: ConsoleInfo | null
-  onSubmit: (username: string, password: string) => void
+  onGithubLogin: () => void
   busy: boolean
   error: string | null
   health: Health | null
 }) {
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [show, setShow] = useState(false)
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault()
-    if (!busy) onSubmit(username.trim(), password)
-  }
-
   return (
     <div className="login-page">
       <div className="login-glow" aria-hidden="true" />
@@ -272,53 +261,23 @@ export function LoginPage({
 
         <div className="login-warning">
           <ShieldCheck size={16} />
-          <span>console นี้ส่งคำสั่งไปยังอุปกรณ์จริง กรุณาเข้าสู่ระบบก่อนใช้งาน</span>
+          <span>console นี้ส่งคำสั่งไปยังอุปกรณ์จริง กรุณายืนยันตัวตนก่อนใช้งาน</span>
         </div>
 
-        <form onSubmit={submit} className="login-form">
-          <label className="field-label" htmlFor="axd-user">ชื่อผู้ใช้</label>
-          <div className="input-wrap">
-            <Terminal size={16} />
-            <input
-              id="axd-user"
-              className="input"
-              autoComplete="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="username"
-              required
-            />
-          </div>
+        {error && <ErrorBanner message={error} />}
 
-          <label className="field-label" htmlFor="axd-pass">รหัสผ่าน</label>
-          <div className="input-wrap">
-            <Lock size={16} />
-            <input
-              id="axd-pass"
-              className="input"
-              type={show ? 'text' : 'password'}
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-            />
-            <button
-              type="button"
-              className="input-eye"
-              onClick={() => setShow((v) => !v)}
-              aria-label={show ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'}
-            >
-              {show ? <EyeOff size={15} /> : <Eye size={15} />}
-            </button>
-          </div>
+        <button
+          className="github-login-btn"
+          type="button"
+          onClick={onGithubLogin}
+          disabled={busy}
+        >
+          {busy ? <Loader2 size={19} className="spin" /> : <Github size={19} />}
+          <span>{busy ? 'กำลังเชื่อมต่อ GitHub…' : 'Continue with GitHub'}</span>
+          <span className="github-login-arrow">→</span>
+        </button>
 
-          {error && <ErrorBanner message={error} />}
-
-          <button className="btn btn--primary btn--block" type="submit" disabled={busy || !username || !password}>
-            {busy ? <><Loader2 size={16} className="spin" /> กำลังเข้าสู่ระบบ…</> : <><LogOut size={16} /> เข้าสู่ระบบ</>}
-          </button>
-        </form>
+        <p className="login-provider-note">Sign in securely with your GitHub account</p>
 
         <div className="login-foot">
           <span><Wifi size={13} /> {health?.protocolVersion || 'MCP 2025-11-25'}</span>

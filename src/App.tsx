@@ -106,6 +106,17 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const authError = params.get('auth_error')
+    if (authError) {
+      const messages: Record<string, string> = {
+        access_denied: 'คุณยกเลิกการอนุญาตจาก GitHub',
+        not_allowed: 'บัญชี GitHub นี้ไม่ได้รับอนุญาตให้เข้าใช้งาน',
+        oauth_failed: 'GitHub authentication ไม่สำเร็จ กรุณาลองใหม่',
+      }
+      setLoginError(messages[authError] || 'ไม่สามารถเข้าสู่ระบบด้วย GitHub ได้')
+      window.history.replaceState({}, '', window.location.pathname)
+    }
     let alive = true
     void (async () => {
       try {
@@ -122,23 +133,10 @@ export default function App() {
     return () => { alive = false }
   }, [loadConsole])
 
-  const handleLogin = async (username: string, password: string) => {
+  const handleGithubLogin = () => {
     setLoginBusy(true)
     setLoginError(null)
-    try {
-      const res = await api.login(username, password)
-      setSession({
-        authenticated: true,
-        username: res.username,
-        expiresAt: res.expiresAt,
-        platform: res.platform,
-      })
-      await loadConsole()
-    } catch (err) {
-      setLoginError(err instanceof ApiError ? err.message : 'เข้าสู่ระบบไม่สำเร็จ')
-    } finally {
-      setLoginBusy(false)
-    }
+    window.location.assign('/api/auth/github')
   }
 
   const handleLogout = async () => {
@@ -230,7 +228,7 @@ export default function App() {
     return (
       <LoginPage
         info={config?.console || null}
-        onSubmit={handleLogin}
+        onGithubLogin={handleGithubLogin}
         busy={loginBusy}
         error={loginError}
         health={health}
