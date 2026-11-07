@@ -270,14 +270,14 @@ export function LoginPage({
           className="github-login-btn"
           type="button"
           onClick={onGithubLogin}
-          disabled={busy}
+          disabled={busy || !health?.authConfigured}
         >
           {busy ? <Loader2 size={19} className="spin" /> : <Github size={19} />}
           <span>{busy ? 'กำลังเชื่อมต่อ GitHub…' : 'Continue with GitHub'}</span>
           <span className="github-login-arrow">→</span>
         </button>
 
-        <p className="login-provider-note">Sign in securely with your GitHub account</p>
+        <p className="login-provider-note">{health?.authConfigured ? 'Sign in securely with your GitHub account' : 'GitHub OAuth ยังไม่ได้ตั้งค่าบนเซิร์ฟเวอร์'}</p>
 
         <div className="login-foot">
           <span><Wifi size={13} /> {health?.protocolVersion || 'MCP 2025-11-25'}</span>
