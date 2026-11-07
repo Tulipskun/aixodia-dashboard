@@ -1,0 +1,63 @@
+{
+  "console": {
+    "name": "AIxodia Console",
+    "owner": "Tulipskun",
+    "tagline": "Build & release dashboard for the AIxodia app family"
+  },
+  "apps": [
+    {
+      "id": "droidime",
+      "repo": "Tulipskun/droidime",
+      "name": "DroidIME",
+      "subtitle": "Native Android keyboard · Thai Kedmanee + English",
+      "tag": "KEYBOARD",
+      "accent": "#8b7cff",
+      "highlights": ["Glide typing", "Word suggestions", "Shizuku / MCP remote control", "Rolling `latest` APK release"]
+    },
+    {
+      "id": "AIxodia",
+      "repo": "Tulipskun/AIxodia",
+      "name": "AIxodia",
+      "subtitle": "Android chat client · Compose + Room + Cloudflare D1",
+      "tag": "CLIENT",
+      "accent": "#38bdf8",
+      "highlights": ["SSE run events", "Native terminal WebSocket", "Offline-first Room cache", "Workers KV daemon discovery"]
+    },
+    {
+      "id": "aixodia-engine",
+      "repo": "Tulipskun/aixodia-engine",
+      "name": "aixodia-engine",
+      "subtitle": "Rust daemon · /v1 API · Named Tunnel · D1 history",
+      "tag": "ENGINE",
+      "accent": "#fbbf24",
+      "highlights": ["Chat run API", "Remote filesystem API", "Self-updating binary", "Cloudflare Named Tunnel"]
+    },
+    {
+      "id": "Droid-MCP",
+      "repo": "Tulipskun/Droid-MCP",
+      "name": "Droid-MCP",
+      "subtitle": "Android MCP server for remote device control",
+      "tag": "MCP",
+      "accent": "#34d399",
+      "highlights": ["Tap / swipe / gesture tools", "Screenshot after actions", "cloudflared runtime source"]
+    },
+    {
+      "id": "Droid-SSH",
+      "repo": "Tulipskun/Droid-SSH",
+      "name": "Droid-SSH",
+      "subtitle": "Android SSH tooling (Kotlin)",
+      "tag": "TOOLING",
+      "accent": "#fb7185",
+      "highlights": ["Kotlin", "Android"]
+    },
+    {
+      "id": "aixodia-dashboard",
+      "repo": "Tulipskun/aixodia-dashboard",
+      "name": "aixodia-dashboard",
+      "subtitle": "React / Vite console · this dashboard itself",
+      "tag": "CONSOLE",
+      "accent": "#c084fc",
+      "highlights": ["Vite + React + TypeScript", "Server-side GitHub API proxy", "Multi-app config", "CI / release / commit panels"]
+    }
+  ]
+}
