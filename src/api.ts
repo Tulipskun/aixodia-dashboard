@@ -6,7 +6,6 @@ import type {
   DeviceStatus,
   DevicesResponse,
   Health,
-  LoginResult,
   Session,
   ToolsResponse,
 } from './types'
@@ -83,8 +82,6 @@ const post = <T,>(path: string, body: unknown) =>
 export const getSession = () => request<Session>('/api/session')
 export const getHealth = () => request<Health>('/api/health')
 
-export const login = (username: string, password: string) =>
-  post<LoginResult>('/api/login', { username, password })
 export const logout = () => post<{ ok: boolean }>('/api/logout', {})
 
 export const getConfig = () => request<ConsoleConfig>('/api/config')

@@ -144,10 +144,3 @@ export interface CommandsResponse {
   cap: number
   ephemeral: boolean
 }
-
-export interface LoginResult {
-  ok: boolean
-  username: string
-  expiresAt: string
-  platform: string
-}
