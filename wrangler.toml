@@ -1,0 +1,14 @@
+"$schema" = "./node_modules/wrangler/config-schema.json"
+
+# ---- Cloudflare Pages (static dist/ + Pages Functions in functions/) ----
+# Pages commands do NOT accept a custom --config path: they auto-detect the
+# root wrangler.toml / wrangler.jsonc. The Workers config lives separately in
+# wrangler.worker.toml and is always passed explicitly with --config.
+name = "aixodia-dashboard"
+compatibility_date = "2026-11-07"
+pages_build_output_dir = "./dist"
+
+# Pages secrets are managed per project (never commit tokens here):
+#   wrangler pages secret put GH_TOKEN --project-name aixodia-dashboard
+# For local `wrangler pages dev`, put GH_TOKEN in .dev.vars (see .dev.vars.example).
+# Do NOT put the token in [vars] — vars are plain text in this repo.

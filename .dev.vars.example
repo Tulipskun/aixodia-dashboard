@@ -1,0 +1,5 @@
+# Copy to .dev.vars and fill in a token. NEVER commit .dev.vars.
+# Use a READ-ONLY token: classic PAT with `public_repo`, or a fine-grained
+# token with "Contents: read" + "Metadata: read" on the public repos only.
+# Local Express mode does not need this file (it uses `gh auth token`).
+GH_TOKEN=ghp_replace_with_a_read_only_token
