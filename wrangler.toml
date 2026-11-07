@@ -8,7 +8,14 @@ name = "aixodia-dashboard"
 compatibility_date = "2026-11-07"
 pages_build_output_dir = "./dist"
 
-# Pages secrets are managed per project (never commit tokens here):
-#   wrangler pages secret put GH_TOKEN --project-name aixodia-dashboard
-# For local `wrangler pages dev`, put GH_TOKEN in .dev.vars (see .dev.vars.example).
-# Do NOT put the token in [vars] — vars are plain text in this repo.
+# Non-secret configuration (same values as wrangler.worker.toml).
+[vars]
+MCP_BASE_URL = "https://mcp.aixodia.dpdns.org"
+SESSION_TTL_SEC = "28800"
+SESSION_VERSION = "1"
+
+# Pages secrets are a SEPARATE store from Workers secrets — set both:
+#   npm run secrets:worker   (wrangler secret put ... --config wrangler.worker.toml)
+#   npm run secrets:pages    (wrangler pages secret put ... --project-name aixodia-dashboard)
+# For local `wrangler pages dev`, copy .dev.vars.example -> .dev.vars.
+# NEVER commit .dev.vars or put credentials in [vars].

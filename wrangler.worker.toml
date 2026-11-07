@@ -12,10 +12,22 @@ binding = "ASSETS"
 run_worker_first = ["/api/*"]
 not_found_handling = "single-page-application"
 
-# Set with: wrangler secret put GH_TOKEN --config wrangler.worker.toml
-# For local dev put it in .dev.vars (see .dev.vars.example).
+# Non-secret configuration. NEVER put tokens here (vars are plain text in git).
+[vars]
+MCP_BASE_URL = "https://mcp.aixodia.dpdns.org"
+SESSION_TTL_SEC = "28800"
+SESSION_VERSION = "1"
+
+# Set from the remote machine with: npm run secrets:worker
+# (values are piped into `wrangler secret put` via stdin, never printed/logged)
 [secrets]
-required = ["GH_TOKEN"]
+required = [
+  "SESSION_SECRET",
+  "AUTH_USERNAME",
+  "AUTH_PASSWORD_HASH",
+  "CF_ACCESS_CLIENT_ID",
+  "CF_ACCESS_CLIENT_SECRET",
+]
 
 [observability]
 enabled = true

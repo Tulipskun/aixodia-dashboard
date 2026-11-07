@@ -1,143 +1,338 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
-import { getConfig, getHealth, getOverview, getSnapshot, refreshCache } from './api'
-import type { ConsoleConfig, Health, Snapshot, Summary } from './types'
+import { Activity, Camera, Terminal, Zap } from 'lucide-react'
+
+import * as api from './api'
+import { ApiError } from './api'
+import { useCommandLog, usePolling } from './hooks'
+import type {
+  ActionResult,
+  CommandLogEntry,
+  ConsoleConfig,
+  DeviceStatus,
+  Health,
+  Screenshot,
+  Session,
+  ToolDescriptor,
+} from './types'
 import {
   Boot,
-  CommitsPanel,
+  CommandLog,
   ErrorBanner,
   Footer,
-  Hero,
-  HighlightsPanel,
-  MetaPanel,
-  ReleasePanel,
-  RunsPanel,
+  LoginPage,
+  OfflineState,
+  Panel,
+  PresetBar,
+  ScreenView,
   Sidebar,
   Skeleton,
-  StatGrid,
+  StatusBadge,
+  ToolForm,
   Topbar,
 } from './components'
 
+type Phase = 'boot' | 'login' | 'console'
+
+function newRequestId(): string {
+  try {
+    return crypto.randomUUID().slice(0, 8)
+  } catch {
+    return Math.random().toString(36).slice(2, 10)
+  }
+}
+
 export default function App() {
-  const [config, setConfig] = useState<ConsoleConfig | null>(null)
+  const [phase, setPhase] = useState<Phase>('boot')
+  const [session, setSession] = useState<Session | null>(null)
   const [health, setHealth] = useState<Health | null>(null)
-  const [overview, setOverview] = useState<Summary[]>([])
-  const [activeId, setActiveId] = useState('droidime')
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
+  const [config, setConfig] = useState<ConsoleConfig | null>(null)
+  const [tools, setTools] = useState<ToolDescriptor[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [status, setStatus] = useState<DeviceStatus | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [screenshot, setScreenshot] = useState<Screenshot | null>(null)
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [lastUpdated, setLastUpdated] = useState<string | null>(null)
+  const [loginBusy, setLoginBusy] = useState(false)
+  const [loginError, setLoginError] = useState<string | null>(null)
+
+  const { entries, push, clear } = useCommandLog()
+  const device = config?.devices.find((d) => d.id === activeId) || null
+  const online = Boolean(status?.online)
+  const controlsDisabled = !online || busy
+
+  // Any 401 from a protected route drops us back to the login screen.
+  useEffect(() => {
+    api.setUnauthorizedHandler(() => {
+      setPhase('login')
+      setSession(null)
+      setScreenshot(null)
+      setStatus(null)
+      setConfig(null)
+    })
+    return () => api.setUnauthorizedHandler(null)
+  }, [])
+
+  const refreshStatus = useCallback(
+    async (force = false) => {
+      if (!activeId) return
+      setChecking(true)
+      try {
+        setStatus(await api.getDeviceStatus(activeId, force))
+      } catch {
+        /* 401 handled globally; transient errors keep the last known status */
+      } finally {
+        setChecking(false)
+      }
+    },
+    [activeId],
+  )
+
+  usePolling(() => refreshStatus(false), 20_000, phase === 'console' && Boolean(activeId))
+
+  const loadConsole = useCallback(async () => {
+    try {
+      const [cfg, toolsRes] = await Promise.all([api.getConfig(), api.getTools()])
+      setConfig(cfg)
+      setTools(toolsRes.tools)
+      const id = cfg.devices[0]?.id || null
+      setActiveId(id)
+      if (id) setStatus(await api.getDeviceStatus(id))
+      setPhase('console')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setPhase('console')
+    }
+  }, [])
 
   useEffect(() => {
     let alive = true
-    ;(async () => {
-      const [cfg, h, ov] = await Promise.allSettled([
-        getConfig(),
-        getHealth(),
-        getOverview(),
-      ])
-      if (!alive) return
-      if (cfg.status === 'fulfilled') setConfig(cfg.value)
-      else setError(cfg.reason?.message || 'Cannot load app config')
-      if (h.status === 'fulfilled') setHealth(h.value)
-      if (ov.status === 'fulfilled') setOverview(ov.value.items)
+    void (async () => {
+      try {
+        const [s, h] = await Promise.all([api.getSession(), api.getHealth()])
+        if (!alive) return
+        setSession(s)
+        setHealth(h)
+        if (s.authenticated) await loadConsole()
+        else setPhase('login')
+      } catch {
+        if (alive) setPhase('login')
+      }
     })()
     return () => { alive = false }
-  }, [])
+  }, [loadConsole])
 
-  const load = useCallback(async (id: string, silent = false) => {
-    if (!silent) {
-      setLoading(true)
-      setSnapshot(null)
-    }
+  const handleLogin = async (username: string, password: string) => {
+    setLoginBusy(true)
+    setLoginError(null)
     try {
-      const s = await getSnapshot(id)
-      setSnapshot(s)
-      setLastUpdated(new Date().toISOString())
-      setError(null)
-    } catch (e) {
-      setError((e as Error).message)
-      if (!silent) setSnapshot(null)
+      const res = await api.login(username, password)
+      setSession({
+        authenticated: true,
+        username: res.username,
+        expiresAt: res.expiresAt,
+        platform: res.platform,
+      })
+      await loadConsole()
+    } catch (err) {
+      setLoginError(err instanceof ApiError ? err.message : 'เข้าสู่ระบบไม่สำเร็จ')
     } finally {
-      setLoading(false)
+      setLoginBusy(false)
     }
-  }, [])
+  }
 
-  useEffect(() => {
-    if (config) load(activeId)
-  }, [activeId, config, load])
+  const handleLogout = async () => {
+    try { await api.logout() } catch { /* still clear local state */ }
+    setSession(null)
+    setConfig(null)
+    setStatus(null)
+    setScreenshot(null)
+    setTools([])
+    setError(null)
+    setPhase('login')
+  }
 
-  useEffect(() => {
-    if (!config) return
-    const timer = window.setInterval(() => {
-      getSnapshot(activeId)
-        .then((s) => { setSnapshot(s); setLastUpdated(new Date().toISOString()); setError(null) })
-        .catch((e) => setError((e as Error).message))
-      getOverview().then((o) => setOverview(o.items)).catch(() => {})
-      getHealth().then(setHealth).catch(() => {})
-    }, 60_000)
-    return () => window.clearInterval(timer)
-  }, [config, activeId])
-
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true)
-    try { await refreshCache() } catch { /* cache endpoint optional */ }
-    const [snap, ov, h] = await Promise.allSettled([
-      getSnapshot(activeId),
-      getOverview(),
-      getHealth(),
-    ])
-    if (snap.status === 'fulfilled') {
-      setSnapshot(snap.value)
-      setLastUpdated(new Date().toISOString())
+  const runAction = useCallback(
+    async (tool: string, args: Record<string, unknown>) => {
+      if (!activeId || busy) return
+      const requestId = newRequestId()
+      setBusy(true)
       setError(null)
-    } else {
-      setError(snap.reason?.message || 'Refresh failed')
-    }
-    if (ov.status === 'fulfilled') setOverview(ov.value.items)
-    if (h.status === 'fulfilled') setHealth(h.value)
-    setRefreshing(false)
-  }, [activeId])
 
-  if (!config) return <Boot error={error} />
+      let result: ActionResult
+      try {
+        result = await api.postAction(activeId, tool, args, requestId)
+      } catch (raw) {
+        const err = raw instanceof ApiError
+          ? raw
+          : new ApiError(0, { error: String(raw), code: 'UNKNOWN' })
+        const isOffline = ['DEVICE_OFFLINE', 'DEVICE_TIMEOUT', 'MCP_RPC_ERROR', 'MCP_TOOL_ERROR'].includes(err.code)
 
-  const app = config.apps.find((a) => a.id === activeId) || config.apps[0]
+        push({
+          id: requestId,
+          at: new Date().toISOString(),
+          tool,
+          device: activeId,
+          ok: false,
+          durationMs: null,
+          hasScreenshot: false,
+          arguments: args,
+          error: { code: err.code, message: err.message },
+        })
+
+        if (isOffline) {
+          // NOT an error banner: the OfflineState card explains the situation.
+          setStatus({
+            online: false,
+            latencyMs: null,
+            checkedAt: new Date().toISOString(),
+            reason: err.code === 'DEVICE_TIMEOUT' ? 'timeout' : 'offline',
+            detail: err.body?.detail || null,
+          })
+        } else {
+          setError(err.message)
+        }
+        setBusy(false)
+        return
+      }
+
+      if (result.screenshot) setScreenshot(result.screenshot)
+      setStatus((prev) => ({
+        online: true,
+        latencyMs: result.durationMs,
+        checkedAt: result.at,
+        reason: null,
+        detail: prev?.detail || null,
+      }))
+      push({
+        id: requestId,
+        at: result.at,
+        tool: result.tool,
+        device: activeId,
+        ok: true,
+        durationMs: result.durationMs,
+        hasScreenshot: Boolean(result.screenshot),
+        arguments: args,
+        error: null,
+      })
+      setBusy(false)
+    },
+    [activeId, busy, push],
+  )
+
+  const handleScreenTap = (x: string, y: string) => void runAction('tap', { x, y })
+  const handleRefreshScreen = () => void runAction('screenshot', {})
+  const handleReplay = (entry: CommandLogEntry) =>
+    void runAction(entry.tool, entry.arguments || {})
+
+  if (phase === 'boot') return <Boot />
+  if (phase === 'login') {
+    return (
+      <LoginPage
+        info={config?.console || null}
+        onSubmit={handleLogin}
+        busy={loginBusy}
+        error={loginError}
+        health={health}
+      />
+    )
+  }
 
   return (
-    <div className="shell">
+    <div className="shell" style={{ '--accent': device?.accent || '#8b7cff' } as CSSProperties}>
       <Sidebar
-        config={config}
+        info={config?.console || null}
+        devices={config?.devices || []}
         activeId={activeId}
-        onSelect={setActiveId}
-        overview={overview}
+        onSelect={(id) => { setActiveId(id); setScreenshot(null) }}
+        status={status}
+        commandCount={entries.length}
+        username={session?.username || null}
+        onLogout={handleLogout}
         health={health}
-        onRefresh={handleRefresh}
-        refreshing={refreshing}
       />
-      <main className="main" style={{ '--accent': app.accent } as CSSProperties}>
-        <Topbar app={app} lastUpdated={lastUpdated} onRefresh={handleRefresh} refreshing={refreshing} />
-        {error && <ErrorBanner message={error} />}
-        {loading && !snapshot ? (
-          <Skeleton />
-        ) : snapshot ? (
-          <>
-            <Hero app={app} snapshot={snapshot} />
-            <StatGrid snapshot={snapshot} />
-            <div className="content-grid">
-              <RunsPanel runs={snapshot.runs} />
-              <div className="right-stack">
-                <ReleasePanel release={snapshot.release} app={app} />
-                <MetaPanel snapshot={snapshot} />
-              </div>
+
+      <main className="main">
+        <Topbar
+          device={device}
+          status={status}
+          checking={checking}
+          busy={busy}
+          onRefresh={handleRefreshScreen}
+          onRetry={() => void refreshStatus(true)}
+          username={session?.username || null}
+          onLogout={handleLogout}
+        />
+
+        <div className="content">
+          {error && <ErrorBanner message={error} onClose={() => setError(null)} />}
+
+          {status === null ? (
+            <div className="status-loading"><Skeleton rows={1} /></div>
+          ) : !status.online ? (
+            <OfflineState status={status} onRetry={() => void refreshStatus(true)} checking={checking} />
+          ) : null}
+
+          <div className="console-grid">
+            <Panel
+              className="screen-panel"
+              title="ภาพหน้าจอ"
+              subtitle="คลิกบนภาพเพื่อแตะตามตำแหน่งเปอร์เซ็นต์"
+              icon={<Camera size={16} />}
+              actions={<StatusBadge status={status} checking={checking} />}
+            >
+              <ScreenView
+                screenshot={screenshot}
+                busy={busy}
+                disabled={!online}
+                onTap={handleScreenTap}
+                onCapture={handleRefreshScreen}
+              />
+            </Panel>
+
+            <div className="right-col">
+              <Panel title="คำสั่งด่วน" subtitle="ปุ่มมาตรฐานของ Android" icon={<Zap size={16} />}>
+                <PresetBar
+                  presets={config?.presets || []}
+                  onRun={(tool, args) => void runAction(tool, args)}
+                  busy={busy}
+                  disabled={controlsDisabled}
+                />
+              </Panel>
+
+              <Panel
+                title="ส่งคำสั่ง"
+                subtitle={`${tools.length} tools · ตรวจสอบ argument ก่อนส่ง`}
+                icon={<Terminal size={16} />}
+              >
+                {tools.length ? (
+                  <ToolForm
+                    tools={tools}
+                    onSubmit={(tool, args) => void runAction(tool, args)}
+                    busy={busy}
+                    disabled={controlsDisabled}
+                  />
+                ) : (
+                  <Skeleton rows={4} />
+                )}
+              </Panel>
             </div>
-            <div className="content-grid bottom-grid">
-              <CommitsPanel commits={snapshot.commits} />
-              <HighlightsPanel app={app} />
-            </div>
-          </>
-        ) : (
-          <div className="fatal">Unable to load data. Try refreshing.</div>
-        )}
+          </div>
+
+          <Panel
+            title="ประวัติคำสั่ง"
+            subtitle="เก็บในเบราว์เซอร์ · ไม่บันทึกภาพหน้าจอ"
+            icon={<Activity size={16} />}
+          >
+            <CommandLog
+              entries={entries}
+              onClear={clear}
+              onReplay={handleReplay}
+              disabled={controlsDisabled}
+            />
+          </Panel>
+        </div>
+
         <Footer health={health} />
       </main>
     </div>

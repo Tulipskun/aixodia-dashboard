@@ -11,9 +11,12 @@
     "cf:dev:worker": "wrangler dev --config wrangler.worker.toml",
     "cf:dev:pages": "wrangler pages dev ./dist --port 8788",
     "deploy:worker": "wrangler deploy --config wrangler.worker.toml",
-    "deploy:pages": "wrangler pages deploy ./dist --project-name aixodia-dashboard",
-    "cf:secret:worker": "wrangler secret put GH_TOKEN --config wrangler.worker.toml",
-    "cf:secret:pages": "wrangler pages secret put GH_TOKEN --project-name aixodia-dashboard"
+    "deploy:pages": "npm run build && wrangler pages deploy ./dist --project-name aixodia-dashboard",
+    "hash:password": "node scripts/hash-password.mjs",
+    "secrets:worker": "node scripts/set-secrets.mjs worker",
+    "secrets:pages": "node scripts/set-secrets.mjs pages",
+    "cf:secret:worker": "wrangler secret put SESSION_SECRET --config wrangler.worker.toml",
+    "cf:secret:pages": "wrangler pages secret put SESSION_SECRET --project-name aixodia-dashboard"
   },
   "dependencies": {
     "express": "^4.21.2",

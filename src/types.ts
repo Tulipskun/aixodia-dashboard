@@ -1,123 +1,153 @@
-export interface AppConfig {
+// Types for the DroidIME Device Console (no GitHub dashboard concepts remain).
+
+export interface ConsoleInfo {
+  name: string
+  subtitle: string
+  tagline: string
+  owner: string
+}
+
+export interface DeviceStatus {
+  online: boolean
+  latencyMs: number | null
+  checkedAt: string
+  reason: string | null
+  detail?: string | null
+  device?: string
+  platform?: string
+}
+
+export interface Device {
   id: string
-  repo: string
   name: string
   subtitle: string
   tag: string
   accent: string
-  highlights: string[]
+  host: string
+  status?: DeviceStatus
 }
 
-export interface ConsoleConfig {
-  console: { name: string; owner: string; tagline: string }
-  apps: AppConfig[]
-}
-
-export interface Run {
-  id: number
-  name: string
-  title: string
-  event: string
-  branch: string | null
-  status: string
-  conclusion: string | null
-  url: string
-  createdAt: string
-  startedAt: string | null
-  updatedAt: string
-  durationSec: number | null
-  actor: string | null
-}
-
-export interface CommitItem {
-  sha: string
-  short: string
-  message: string
-  author: string
-  date: string | null
-  url: string
-}
-
-export interface ReleaseAsset {
-  name: string
-  size: number
-  downloads: number
-  url: string
-  contentType: string
-}
-
-export interface Release {
-  name: string
-  tag: string
-  url: string
-  publishedAt: string | null
-  body: string
-  versionCode: number | null
-  assets: ReleaseAsset[]
-}
-
-export interface RepoInfo {
-  name: string
-  fullName: string
-  url: string
-  description: string
-  stars: number
-  forks: number
-  watchers: number
-  openIssues: number
-  language: string | null
-  pushedAt: string | null
-  createdAt: string | null
-  defaultBranch: string
-  private: boolean
-  archived: boolean
-  sizeKb: number
-  license: string | null
-  topics: string[]
-}
-
-export interface Snapshot {
-  app: AppConfig
-  repo: RepoInfo
-  release: Release | null
-  runs: Run[]
-  commits: CommitItem[]
-  languages: Record<string, number>
-  openPulls: number
-  fetchedAt: string
-}
-
-export interface Summary {
+export interface Preset {
   id: string
+  label: string
+  tool: string
+  arguments: Record<string, unknown>
+  hint?: string
+}
+
+export type ToolFieldKind = 'percent' | 'int' | 'text' | 'points' | 'pointers' | 'keycodes'
+
+export interface ToolField {
+  key: string
+  label: string
+  kind: ToolFieldKind
+  required: boolean
+  default?: string | number
+  placeholder?: string
+  hint?: string
+  min?: number
+  max?: number
+  maxLength?: number
+}
+
+export interface ToolDescriptor {
   name: string
-  accent: string
-  tag?: string
+  label: string
+  description: string
+  group: string
+  fields: ToolField[]
+}
+
+export interface Screenshot {
+  mimeType: string
+  data: string
+}
+
+export interface ActionResult {
   ok: boolean
-  error?: string
-  openIssues?: number
-  openPulls?: number
-  stars?: number
-  pushedAt?: string | null
-  releaseName?: string | null
-  versionCode?: number | null
-  latestRun?: { conclusion: string | null; status: string; title: string } | null
-  ciRate?: number | null
+  device: string
+  tool: string
+  arguments: Record<string, unknown>
+  text: string
+  screenshot: Screenshot | null
+  durationMs: number
+  at: string
+  requestId: string
+  platform?: string
+}
+
+export interface Session {
+  authenticated: boolean
+  username: string | null
+  expiresAt: string | null
+  platform: string
 }
 
 export interface Health {
   ok: boolean
-  authenticated: boolean
-  tokenSource: string
-  login: string | null
-  rate: { limit: number; remaining: number; reset: number; used: number } | null
-  cacheTtlMs: number
-  appCount: number
+  platform: string
+  authConfigured: boolean
+  mcpConfigured: boolean
+  mcpBaseUrl: string
+  protocolVersion: string
+  deviceCount: number
   consoleName: string
-  owner: string
-  tagline: string
+  time: string
 }
 
-export interface Overview {
-  items: Summary[]
-  fetchedAt: string
+export interface ConsoleConfig {
+  console: ConsoleInfo
+  devices: Device[]
+  presets: Preset[]
+  protocolVersion?: string
+  platform?: string
+}
+
+export interface CommandLogEntry {
+  id: string
+  at: string
+  tool: string
+  device: string
+  ok: boolean
+  durationMs: number | null
+  hasScreenshot: boolean
+  arguments?: Record<string, unknown>
+  error?: { code: string; message: string } | null
+}
+
+export interface ApiErrorBody {
+  error: string
+  code: string
+  requestId?: string
+  reason?: string | null
+  detail?: string | null
+  checkedAt?: string
+  retryAfter?: number
+}
+
+export interface ToolsResponse {
+  tools: ToolDescriptor[]
+  source: 'catalog' | 'device'
+  deviceTools: Array<{ name: string; description: string; inputSchema: unknown }> | null
+  protocolVersion: string
+  note: string
+}
+
+export interface DevicesResponse {
+  items: Device[]
+  checkedAt: string
+  ephemeral: boolean
+}
+
+export interface CommandsResponse {
+  items: CommandLogEntry[]
+  cap: number
+  ephemeral: boolean
+}
+
+export interface LoginResult {
+  ok: boolean
+  username: string
+  expiresAt: string
+  platform: string
 }

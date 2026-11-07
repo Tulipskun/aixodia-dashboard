@@ -1,486 +1,802 @@
-import type { CSSProperties, ReactNode } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type MouseEvent,
+  type ReactNode,
+} from 'react'
 import {
   Activity,
-  AlertCircle,
-  ArrowUpRight,
-  Ban,
-  Boxes,
+  AlertTriangle,
+  ArrowLeft,
+  Camera,
   CheckCircle2,
-  ChevronRight,
+  ChevronDown,
   CircleDot,
-  Clock3,
-  Code2,
-  Database,
-  Download,
-  ExternalLink,
-  GitBranch,
-  GitCommitHorizontal,
-  GitPullRequest,
-  Github,
-  Layers,
-  LoaderCircle,
-  Package,
+  Clock,
+  Eye,
+  EyeOff,
+  Hand,
+  Keyboard,
+  LayoutGrid,
+  Loader2,
+  Lock,
+  LogOut,
+  MousePointer2,
+  Move,
+  Play,
   RefreshCw,
-  Server,
+  ScanLine,
+  Send,
   ShieldCheck,
-  Sparkles,
-  Star,
+  Smartphone,
+  Terminal,
+  Trash2,
+  Type,
   Wifi,
+  WifiOff,
   XCircle,
+  Zap,
 } from 'lucide-react'
-import type { AppConfig, ConsoleConfig, Health, Release, Run, Snapshot, Summary } from './types'
+import type {
+  CommandLogEntry,
+  ConsoleInfo,
+  Device,
+  DeviceStatus,
+  Health,
+  Preset,
+  Screenshot,
+  ToolDescriptor,
+  ToolField,
+} from './types'
 
-/* ---------------- helpers ---------------- */
+// ---------------------------------------------------------------- helpers
+
+export function fmtTime(iso?: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
 
 export function relTime(iso?: string | null): string {
   if (!iso) return '—'
   const diff = Date.now() - new Date(iso).getTime()
-  if (!Number.isFinite(diff)) return '—'
-  const s = Math.max(0, Math.floor(diff / 1000))
-  if (s < 60) return `${s}s ago`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  const d = Math.floor(h / 24)
-  if (d < 30) return `${d}d ago`
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  if (Number.isNaN(diff)) return '—'
+  if (diff < 5_000) return 'เมื่อกี้'
+  if (diff < 60_000) return `${Math.floor(diff / 1000)} วิที่แล้ว`
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} นาทีที่แล้ว`
+  return fmtTime(iso)
 }
 
-export function fmtDate(iso?: string | null): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString('en-US', {
-    month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  })
+const TOOL_ICONS: Record<string, ReactNode> = {
+  tap: <MousePointer2 size={15} />,
+  long_press: <Hand size={15} />,
+  swipe: <Move size={15} />,
+  gesture: <ScanLine size={15} />,
+  multi_touch: <CircleDot size={15} />,
+  key_event: <Keyboard size={15} />,
+  input_text: <Type size={15} />,
+  screenshot: <Camera size={15} />,
 }
 
-export function fmtBytes(n?: number | null): string {
-  if (!n || n <= 0) return '—'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let i = 0
-  let v = n
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
-  return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${units[i]}`
+const PRESET_ICONS: Record<string, ReactNode> = {
+  home: <LayoutGrid size={15} />,
+  back: <ArrowLeft size={15} />,
+  recents: <LayoutGrid size={15} />,
+  enter: <Send size={15} />,
+  screen: <Camera size={15} />,
 }
 
-export function fmtDur(sec?: number | null): string {
-  if (sec == null) return '—'
-  if (sec < 60) return `${sec}s`
-  return `${Math.floor(sec / 60)}m ${String(sec % 60).padStart(2, '0')}s`
+export function toolIcon(name: string): ReactNode {
+  return TOOL_ICONS[name] || <Zap size={15} />
 }
 
-type RunKind = 'success' | 'failure' | 'cancelled' | 'running' | 'neutral'
-type RunLike = Pick<Run, 'status' | 'conclusion'>
+// ---------------------------------------------------------------- primitives
 
-export function runMeta(r: RunLike): { kind: RunKind; label: string } {
-  if (r.status !== 'completed') return { kind: 'running', label: 'running' }
-  switch (r.conclusion) {
-    case 'success': return { kind: 'success', label: 'passed' }
-    case 'failure': return { kind: 'failure', label: 'failed' }
-    case 'cancelled': return { kind: 'cancelled', label: 'cancelled' }
-    default: return { kind: 'neutral', label: r.conclusion || r.status }
-  }
-}
-
-function RunIcon({ kind, size = 16 }: { kind: RunKind; size?: number }) {
-  const props = { size, strokeWidth: 2 }
-  if (kind === 'success') return <CheckCircle2 {...props} />
-  if (kind === 'failure') return <XCircle {...props} />
-  if (kind === 'cancelled') return <Ban {...props} />
-  if (kind === 'running') return <LoaderCircle {...props} className="spin" />
-  return <CircleDot {...props} />
-}
-
-const accentStyle = (accent: string): CSSProperties => ({ '--accent': accent } as CSSProperties)
-
-function initials(name: string): string {
-  const clean = name.replace(/[^a-zA-Z0-9]/g, '')
-  return (clean.slice(0, 2) || 'AX').toUpperCase()
-}
-
-function Chip({ icon, children }: { icon: ReactNode; children: ReactNode }) {
-  return <span className="chip">{icon}{children}</span>
-}
-
-function Panel({ title, icon, extra, children, className = '' }: {
-  title: string; icon: ReactNode; extra?: ReactNode; children: ReactNode; className?: string
+export function Panel({
+  title,
+  subtitle,
+  icon,
+  actions,
+  children,
+  className = '',
+  bodyClassName = '',
+}: {
+  title?: string
+  subtitle?: string
+  icon?: ReactNode
+  actions?: ReactNode
+  children: ReactNode
+  className?: string
+  bodyClassName?: string
 }) {
   return (
     <section className={`panel ${className}`}>
-      <header className="panel-head">
-        <div className="panel-title">{icon}<h2>{title}</h2></div>
-        {extra}
-      </header>
-      <div className="panel-body">{children}</div>
-    </section>
-  )
-}
-
-function Empty({ text }: { text: string }) {
-  return <div className="empty"><AlertCircle size={18} /><span>{text}</span></div>
-}
-
-/* ---------------- sidebar ---------------- */
-
-export function Sidebar({ config, activeId, onSelect, overview, health, onRefresh, refreshing }: {
-  config: ConsoleConfig
-  activeId: string
-  onSelect: (id: string) => void
-  overview: Summary[]
-  health: Health | null
-  onRefresh: () => void
-  refreshing: boolean
-}) {
-  const byId = new Map(overview.map((o) => [o.id, o]))
-  return (
-    <aside className="sidebar">
-      <div className="brand">
-        <div className="brand-mark"><Boxes size={20} /></div>
-        <div className="brand-text">
-          <strong>{config.console.name}</strong>
-          <span>{config.console.owner} / workspace</span>
-        </div>
-      </div>
-
-      <div className="nav-label">APPLICATIONS <span>{config.apps.length}</span></div>
-      <nav className="app-nav">
-        {config.apps.map((app) => {
-          const sum = byId.get(app.id)
-          const kind = sum?.latestRun
-            ? runMeta({ status: sum.latestRun.status, conclusion: sum.latestRun.conclusion }).kind
-            : 'neutral'
-          return (
-            <button
-              key={app.id}
-              className={`app-nav-item ${app.id === activeId ? 'active' : ''}`}
-              style={accentStyle(app.accent)}
-              onClick={() => onSelect(app.id)}
-              title={app.subtitle}
-            >
-              <span className="app-glyph">{initials(app.name)}</span>
-              <span className="app-nav-text">
-                <strong>{app.name}</strong>
-                <small>{app.tag}</small>
-              </span>
-              <span className={`run-dot ${kind}`} title={sum?.latestRun ? `CI: ${kind}` : 'No CI data'} />
-            </button>
-          )
-        })}
-      </nav>
-
-      <div className="side-section">
-        <div className="nav-label">OVERVIEW</div>
-        <div className="mini-stats">
-          <div><span>Apps</span><strong>{config.apps.length}</strong></div>
-          <div><span>Total stars</span><strong>{overview.reduce((n, o) => n + (o.stars || 0), 0)}</strong></div>
-          <div><span>Open PRs</span><strong>{overview.reduce((n, o) => n + (o.openPulls || 0), 0)}</strong></div>
-        </div>
-      </div>
-
-      <div className="side-footer">
-        <div className="auth-line">
-          <span className={`auth-dot ${health?.authenticated ? 'ok' : 'warn'}`} />
-          <div>
-            <strong>{health?.login || (health?.authenticated ? 'GitHub token' : 'Public access')}</strong>
-            <small>{health ? `${health.rate?.remaining ?? '—'} / ${health.rate?.limit ?? '—'} API calls left` : 'connecting…'}</small>
-          </div>
-        </div>
-        <button className="btn-refresh" onClick={onRefresh} disabled={refreshing}>
-          <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
-          {refreshing ? 'Refreshing…' : 'Refresh data'}
-        </button>
-        <p className="side-note">Token stays on the server. Add apps in <code>apps.config.json</code>.</p>
-      </div>
-    </aside>
-  )
-}
-
-/* ---------------- topbar ---------------- */
-
-export function Topbar({ app, lastUpdated, onRefresh, refreshing }: {
-  app: AppConfig
-  lastUpdated: string | null
-  onRefresh: () => void
-  refreshing: boolean
-}) {
-  return (
-    <header className="topbar">
-      <div className="crumbs">
-        <span>CONSOLE</span><ChevronRight size={14} /><strong>{app.name}</strong>
-        <span className="live-pill"><span className="live-dot" /> LIVE · 60s</span>
-      </div>
-      <div className="top-actions">
-        <span className="updated">Updated {relTime(lastUpdated)}</span>
-        <button className="icon-btn" onClick={onRefresh} title="Refresh" disabled={refreshing}>
-          <RefreshCw size={15} className={refreshing ? 'spin' : ''} />
-        </button>
-        <a className="icon-btn" href={`https://github.com/${app.repo}`} target="_blank" rel="noreferrer" title="Open repository">
-          <Github size={15} />
-        </a>
-      </div>
-    </header>
-  )
-}
-
-/* ---------------- hero ---------------- */
-
-export function Hero({ app, snapshot }: { app: AppConfig; snapshot: Snapshot }) {
-  const latest = snapshot.runs[0]
-  const meta = latest ? runMeta(latest) : null
-  return (
-    <section className="hero" style={accentStyle(app.accent)}>
-      <div className="hero-main">
-        <div className="eyebrow">
-          <span className="hero-tag">{app.tag}</span>
-          <span className="repo-path">{app.repo}</span>
-        </div>
-        <h1>{app.name}</h1>
-        <p>{snapshot.repo.description}</p>
-        <div className="chips">
-          <Chip icon={<GitBranch size={13} />}>{snapshot.repo.defaultBranch}</Chip>
-          <Chip icon={<Code2 size={13} />}>{snapshot.repo.language || 'mixed'}</Chip>
-          <Chip icon={<ShieldCheck size={13} />}>{snapshot.repo.private ? 'Private' : 'Public'}</Chip>
-          {snapshot.repo.license && <Chip icon={<ShieldCheck size={13} />}>{snapshot.repo.license}</Chip>}
-          <Chip icon={<Clock3 size={13} />}>push {relTime(snapshot.repo.pushedAt)}</Chip>
-        </div>
-      </div>
-      <div className="hero-side">
-        {meta && (
-          <div className={`build-status ${meta.kind}`}>
-            <RunIcon kind={meta.kind} size={18} />
+      {(title || actions) && (
+        <header className="panel-head">
+          <div className="panel-head-left">
+            {icon && <span className="panel-icon">{icon}</span>}
             <div>
-              <span>LATEST CI RUN</span>
-              <strong>{meta.label}</strong>
+              {title && <h2 className="panel-title">{title}</h2>}
+              {subtitle && <p className="panel-sub">{subtitle}</p>}
             </div>
           </div>
-        )}
-        <a className="btn-primary" href={snapshot.repo.url} target="_blank" rel="noreferrer">
-          Open repository <ArrowUpRight size={15} />
-        </a>
-      </div>
+          {actions && <div className="panel-actions">{actions}</div>}
+        </header>
+      )}
+      <div className={`panel-body ${bodyClassName}`}>{children}</div>
     </section>
   )
 }
 
-/* ---------------- stat cards ---------------- */
+export function Chip({ children, tone = 'default' }: { children: ReactNode; tone?: 'default' | 'ok' | 'bad' | 'warn' | 'info' }) {
+  return <span className={`chip chip--${tone}`}>{children}</span>
+}
 
-export function StatGrid({ snapshot }: { snapshot: Snapshot }) {
-  const { runs, release, repo, openPulls } = snapshot
-  const passed = runs.filter((r) => r.conclusion === 'success').length
-  const rate = runs.length ? Math.round((passed / runs.length) * 100) : null
-  const asset = release?.assets?.reduce((a, b) => (b.size > (a?.size || 0) ? b : a), release.assets[0])
-  const issuesOnly = Math.max(0, repo.openIssues - openPulls)
-
-  const cards = [
-    { label: 'LATEST BUILD', value: release?.versionCode ? `v${release.versionCode}` : (release?.name || 'No release'), sub: release ? `${release.name} · ${release.versionCode ? `code ${release.versionCode}` : `tag ${release.tag}`}` : '—', icon: <Package size={18} /> },
-    { label: 'ARTIFACT', value: asset ? fmtBytes(asset.size) : '—', sub: asset ? `${asset.name} · ${asset.downloads} downloads` : 'no assets', icon: <Download size={18} /> },
-    { label: `CI HEALTH · ${runs.length} RUNS`, value: rate != null ? `${rate}%` : '—', sub: `${passed} passed / ${runs.length} recent`, icon: <Activity size={18} /> },
-    { label: 'OPEN WORK', value: `${issuesOnly + openPulls}`, sub: `${issuesOnly} issues · ${openPulls} PRs`, icon: <GitPullRequest size={18} /> },
-    { label: 'LAST PUSH', value: relTime(repo.pushedAt), sub: fmtDate(repo.pushedAt), icon: <Clock3 size={18} /> },
-    { label: 'COMMUNITY', value: `${repo.stars} / ${repo.forks}`, sub: 'stars / forks', icon: <Star size={18} /> },
-  ]
-
+export function Empty({ icon, title, hint }: { icon?: ReactNode; title: string; hint?: string }) {
   return (
-    <div className="stat-grid">
-      {cards.map((c, i) => (
-        <div className="stat-card" key={c.label} style={{ animationDelay: `${i * 45}ms` }}>
-          <div className="stat-top"><span>{c.label}</span>{c.icon}</div>
-          <strong className="stat-value" title={c.value}>{c.value}</strong>
-          <span className="stat-sub" title={c.sub}>{c.sub}</span>
-        </div>
+    <div className="empty">
+      {icon && <div className="empty-icon">{icon}</div>}
+      <p className="empty-title">{title}</p>
+      {hint && <p className="empty-hint">{hint}</p>}
+    </div>
+  )
+}
+
+export function ErrorBanner({ message, onClose }: { message: string; onClose?: () => void }) {
+  return (
+    <div className="error-banner" role="alert">
+      <AlertTriangle size={16} />
+      <span>{message}</span>
+      {onClose && (
+        <button className="icon-btn" onClick={onClose} aria-label="ปิด">×</button>
+      )}
+    </div>
+  )
+}
+
+export function Skeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div className="skeleton-wrap">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div className="skeleton" key={i} style={{ width: `${92 - i * 14}%` }} />
       ))}
     </div>
   )
 }
 
-/* ---------------- CI runs ---------------- */
-
-export function RunsPanel({ runs }: { runs: Run[] }) {
-  const total = runs.length
-  const success = runs.filter((r) => r.conclusion === 'success').length
-  return (
-    <Panel
-      title="CI · Workflow runs"
-      icon={<Activity size={17} />}
-      extra={<span className="panel-extra">{success}/{total} passed</span>}
-      className="runs-panel"
-    >
-      {runs.length === 0 ? <Empty text="No workflow runs found for this repository." /> : (
-        <>
-          <div className="run-strip" aria-hidden="true">
-            {[...runs].reverse().map((r) => {
-              const m = runMeta(r)
-              return <span key={r.id} className={`strip-seg ${m.kind}`} title={`${m.label} · ${r.title}`} />
-            })}
-          </div>
-          <ul className="run-list">
-            {runs.map((r) => {
-              const m = runMeta(r)
-              return (
-                <li key={r.id} className={`run-row ${m.kind}`}>
-                  <span className="run-icon"><RunIcon kind={m.kind} /></span>
-                  <a className="run-title" href={r.url} target="_blank" rel="noreferrer" title={r.title}>{r.title}</a>
-                  <span className="run-meta">
-                    <span>{r.event} · {r.branch || '—'}</span>
-                    <span>{fmtDur(r.durationSec)}</span>
-                    <span>{relTime(r.createdAt)}</span>
-                  </span>
-                  <span className={`run-badge ${m.kind}`}>{m.label}</span>
-                  <ExternalLink size={13} className="run-ext" />
-                </li>
-              )
-            })}
-          </ul>
-        </>
-      )}
-    </Panel>
-  )
-}
-
-/* ---------------- release ---------------- */
-
-export function ReleasePanel({ release, app }: { release: Release | null; app: AppConfig }) {
-  return (
-    <Panel title="Latest release" icon={<Package size={17} />} extra={release && <span className="panel-extra">tag: {release.tag}</span>}>
-      {!release ? <Empty text="This repository has no published release yet." /> : (
-        <div className="release">
-          <div className="release-head">
-            <div className="release-mark"><Sparkles size={18} /></div>
-            <div>
-              <strong>{release.name}</strong>
-              <span>{fmtDate(release.publishedAt)}</span>
-            </div>
-          </div>
-          {release.versionCode && <div className="version-line">versionCode <b>{release.versionCode}</b> · auto from workflow run number</div>}
-          {release.body && <p className="release-body">{release.body.slice(0, 240)}</p>}
-          <div className="asset-list">
-            {release.assets.length === 0 && <Empty text="No assets attached." />}
-            {release.assets.map((a) => (
-              <div className="asset" key={a.name}>
-                <div className="asset-info">
-                  <strong>{a.name}</strong>
-                  <span>{fmtBytes(a.size)} · {a.downloads} downloads</span>
-                </div>
-                <a className="dl-btn" href={a.url} target="_blank" rel="noreferrer">
-                  <Download size={14} /> APK
-                </a>
-              </div>
-            ))}
-          </div>
-          <a className="text-link" href={release.url} target="_blank" rel="noreferrer">
-            View release on GitHub <ArrowUpRight size={13} />
-          </a>
-        </div>
-      )}
-      {app.id === 'droidime' && <p className="panel-foot">Pushes to <code>main</code> rebuild a signed APK and replace the rolling <code>latest</code> release.</p>}
-    </Panel>
-  )
-}
-
-/* ---------------- repo meta ---------------- */
-
-export function MetaPanel({ snapshot }: { snapshot: Snapshot }) {
-  const entries = Object.entries(snapshot.languages || {}).sort((a, b) => b[1] - a[1])
-  const total = entries.reduce((n, [, v]) => n + v, 0) || 1
-  const colors = ['#8b7cff', '#38bdf8', '#34d399', '#fbbf24', '#fb7185', '#a78bfa']
-  return (
-    <Panel title="Repository" icon={<Server size={17} />}>
-      <div className="lang-head"><span>LANGUAGES</span><span>{entries.length} detected</span></div>
-      <div className="lang-bar">
-        {entries.map(([name, bytes], i) => (
-          <span key={name} style={{ width: `${(bytes / total) * 100}%`, background: colors[i % colors.length] }} title={`${name} ${((bytes / total) * 100).toFixed(1)}%`} />
-        ))}
-      </div>
-      <div className="lang-legend">
-        {entries.map(([name, bytes], i) => (
-          <span key={name}><i style={{ background: colors[i % colors.length] }} />{name} <b>{((bytes / total) * 100).toFixed(1)}%</b></span>
-        ))}
-        {entries.length === 0 && <span className="muted">no language data</span>}
-      </div>
-      <div className="fact-grid">
-        <div><span>Created</span><strong>{relTime(snapshot.repo.createdAt)}</strong></div>
-        <div><span>Size</span><strong>{fmtBytes((snapshot.repo.sizeKb || 0) * 1024)}</strong></div>
-        <div><span>Branch</span><strong>{snapshot.repo.defaultBranch}</strong></div>
-        <div><span>PRs open</span><strong>{snapshot.openPulls}</strong></div>
-      </div>
-      {snapshot.repo.topics.length > 0 && (
-        <div className="topics">{snapshot.repo.topics.map((t) => <span key={t}>{t}</span>)}</div>
-      )}
-    </Panel>
-  )
-}
-
-/* ---------------- commits ---------------- */
-
-export function CommitsPanel({ commits }: { commits: Snapshot['commits'] }) {
-  return (
-    <Panel title="Recent commits" icon={<GitCommitHorizontal size={17} />} extra={<span className="panel-extra">{commits.length} latest</span>}>
-      {commits.length === 0 ? <Empty text="No commits found." /> : (
-        <ul className="commit-list">
-          {commits.map((c) => (
-            <li key={c.sha}>
-              <code>{c.short}</code>
-              <a href={c.url} target="_blank" rel="noreferrer" title={c.message}>{c.message}</a>
-              <span className="commit-meta">{c.author} · {relTime(c.date)}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Panel>
-  )
-}
-
-export function HighlightsPanel({ app }: { app: AppConfig }) {
-  const icons = [<Wifi size={14} />, <Database size={14} />, <Layers size={14} />, <Code2 size={14} />]
-  return (
-    <Panel title="What's inside" icon={<Sparkles size={17} />} extra={<span className="panel-extra">{app.tag}</span>}>
-      <ul className="highlight-list">
-        {app.highlights.map((h, i) => (
-          <li key={h}><span className="hi-icon">{icons[i % icons.length]}</span>{h}</li>
-        ))}
-      </ul>
-      <div className="add-hint">
-        <strong>Adding another app?</strong>
-        <span>Append one entry to <code>apps.config.json</code> — the sidebar, overview and API pick it up automatically.</span>
-      </div>
-    </Panel>
-  )
-}
-
-/* ---------------- misc ---------------- */
-
-export function ErrorBanner({ message }: { message: string }) {
-  return <div className="error-banner"><AlertCircle size={17} /><span>{message}</span></div>
-}
-
-export function Skeleton() {
-  return (
-    <div className="skeleton-wrap">
-      <div className="sk sk-hero" />
-      <div className="sk-grid">{Array.from({ length: 6 }).map((_, i) => <div className="sk" key={i} />)}</div>
-      <div className="sk sk-panel" />
-    </div>
-  )
-}
-
-export function Boot({ error }: { error: string | null }) {
+export function Boot({ label = 'กำลังเชื่อมต่อ console…' }: { label?: string }) {
   return (
     <div className="boot">
-      <div className="boot-mark"><Boxes size={26} /></div>
-      <strong>AIxodia Console</strong>
-      {error ? <span className="boot-error">{error}</span> : <span className="boot-loading"><LoaderCircle size={14} className="spin" /> connecting to GitHub…</span>}
+      <div className="boot-mark"><Smartphone size={26} /></div>
+      <div className="boot-spinner" />
+      <p className="boot-label">{label}</p>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------- status
+
+export function StatusBadge({ status, checking }: { status: DeviceStatus | null; checking?: boolean }) {
+  if (checking || !status) {
+    return (
+      <span className="status-badge status-badge--pending">
+        <Loader2 size={13} className="spin" /> กำลังตรวจสอบ
+      </span>
+    )
+  }
+  if (status.online) {
+    return (
+      <span className="status-badge status-badge--online">
+        <span className="status-dot" /> ONLINE{status.latencyMs !== null ? ` · ${status.latencyMs}ms` : ''}
+      </span>
+    )
+  }
+  return (
+    <span className="status-badge status-badge--offline">
+      <WifiOff size={13} /> OFFLINE
+    </span>
+  )
+}
+
+export function OfflineState({
+  status,
+  onRetry,
+  checking,
+}: {
+  status: DeviceStatus | null
+  onRetry: () => void
+  checking?: boolean
+}) {
+  const reason =
+    status?.reason === 'timeout' ? 'อุปกรณ์ไม่ตอบสนองภายในเวลาที่กำหนด (timeout)'
+    : status?.reason === 'offline' ? 'ไม่พบ MCP server กำลังทำงานบนอุปกรณ์'
+    : status?.reason ? `เหตุผล: ${status.reason}`
+    : 'ยังไม่ได้ตรวจสอบสถานะ'
+
+  return (
+    <div className="offline-card">
+      <div className="offline-icon"><WifiOff size={22} /></div>
+      <div className="offline-copy">
+        <h3>อุปกรณ์ออฟไลน์</h3>
+        <p>{reason}</p>
+        <p className="offline-meta">
+          ตรวจล่าสุด {fmtTime(status?.checkedAt)} · console และ API พร้อมใช้งานแล้ว รอให้เปิด MCP server บนเครื่อง
+        </p>
+      </div>
+      <button className="btn btn--ghost" onClick={onRetry} disabled={checking}>
+        <RefreshCw size={14} className={checking ? 'spin' : ''} /> ลองใหม่
+      </button>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- login
+
+export function LoginPage({
+  info,
+  onSubmit,
+  busy,
+  error,
+  health,
+}: {
+  info: ConsoleInfo | null
+  onSubmit: (username: string, password: string) => void
+  busy: boolean
+  error: string | null
+  health: Health | null
+}) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [show, setShow] = useState(false)
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    if (!busy) onSubmit(username.trim(), password)
+  }
+
+  return (
+    <div className="login-page">
+      <div className="login-glow" aria-hidden="true" />
+      <div className="login-card">
+        <div className="login-brand">
+          <div className="login-mark"><Smartphone size={24} /></div>
+          <div>
+            <h1>{info?.name || 'AIxodia Device Console'}</h1>
+            <p>{info?.subtitle || 'หน้าควบคุมอุปกรณ์ Android ผ่าน DroidIME MCP'}</p>
+          </div>
+        </div>
+
+        <div className="login-warning">
+          <ShieldCheck size={16} />
+          <span>console นี้ส่งคำสั่งไปยังอุปกรณ์จริง กรุณาเข้าสู่ระบบก่อนใช้งาน</span>
+        </div>
+
+        <form onSubmit={submit} className="login-form">
+          <label className="field-label" htmlFor="axd-user">ชื่อผู้ใช้</label>
+          <div className="input-wrap">
+            <Terminal size={16} />
+            <input
+              id="axd-user"
+              className="input"
+              autoComplete="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="username"
+              required
+            />
+          </div>
+
+          <label className="field-label" htmlFor="axd-pass">รหัสผ่าน</label>
+          <div className="input-wrap">
+            <Lock size={16} />
+            <input
+              id="axd-pass"
+              className="input"
+              type={show ? 'text' : 'password'}
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              required
+            />
+            <button
+              type="button"
+              className="input-eye"
+              onClick={() => setShow((v) => !v)}
+              aria-label={show ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'}
+            >
+              {show ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          </div>
+
+          {error && <ErrorBanner message={error} />}
+
+          <button className="btn btn--primary btn--block" type="submit" disabled={busy || !username || !password}>
+            {busy ? <><Loader2 size={16} className="spin" /> กำลังเข้าสู่ระบบ…</> : <><LogOut size={16} /> เข้าสู่ระบบ</>}
+          </button>
+        </form>
+
+        <div className="login-foot">
+          <span><Wifi size={13} /> {health?.protocolVersion || 'MCP 2025-11-25'}</span>
+          <span>{health?.platform || 'cloudflare'}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- shell
+
+export function Sidebar({
+  info,
+  devices,
+  activeId,
+  onSelect,
+  status,
+  commandCount,
+  username,
+  onLogout,
+  health,
+}: {
+  info: ConsoleInfo | null
+  devices: Device[]
+  activeId: string | null
+  onSelect: (id: string) => void
+  status: DeviceStatus | null
+  commandCount: number
+  username: string | null
+  onLogout: () => void
+  health: Health | null
+}) {
+  const online = status?.online ? 1 : 0
+  return (
+    <aside className="sidebar">
+      <div className="brand">
+        <div className="brand-mark"><Smartphone size={20} /></div>
+        <div className="brand-copy">
+          <strong>{info?.name || 'AIxodia Console'}</strong>
+          <span>{info?.tagline || 'Device control · DroidIME MCP'}</span>
+        </div>
+      </div>
+
+      <div className="side-section">
+        <p className="side-label">DEVICES</p>
+        <div className="device-list">
+          {devices.map((d) => (
+            <button
+              key={d.id}
+              className={`device-item ${d.id === activeId ? 'is-active' : ''}`}
+              onClick={() => onSelect(d.id)}
+              style={{ '--device-accent': d.accent } as CSSProperties}
+            >
+              <span className="device-item-icon"><Smartphone size={16} /></span>
+              <span className="device-item-copy">
+                <strong>{d.name}</strong>
+                <em>{d.subtitle}</em>
+              </span>
+              <span className={`device-item-led ${d.id === activeId && status?.online ? 'is-online' : ''}`} />
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="side-section side-stats">
+        <p className="side-label">SESSION</p>
+        <div className="mini-stats">
+          <div className="mini-stat">
+            <span className="mini-stat-label">ONLINE</span>
+            <strong className={online ? 'is-ok' : 'is-bad'}>{online}<small>/{devices.length}</small></strong>
+          </div>
+          <div className="mini-stat">
+            <span className="mini-stat-label">DEVICES</span>
+            <strong>{devices.length}</strong>
+          </div>
+          <div className="mini-stat">
+            <span className="mini-stat-label">COMMANDS</span>
+            <strong>{commandCount}</strong>
+          </div>
+        </div>
+      </div>
+
+      <div className="side-bottom">
+        <div className="side-meta">
+          <span><Activity size={12} /> {health?.protocolVersion || '2025-11-25'}</span>
+          <span>{health?.platform || 'cloudflare'}</span>
+        </div>
+        <div className="side-user">
+          <div className="avatar">{(username || '?').slice(0, 1).toUpperCase()}</div>
+          <div className="side-user-copy">
+            <strong>{username || 'guest'}</strong>
+            <em>signed in</em>
+          </div>
+          <button className="icon-btn" onClick={onLogout} title="ออกจากระบบ" aria-label="ออกจากระบบ">
+            <LogOut size={15} />
+          </button>
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+export function UserMenu({ username, onLogout }: { username: string | null; onLogout: () => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="user-menu">
+      <button className="user-menu-trigger" onClick={() => setOpen((v) => !v)}>
+        <span className="avatar avatar--sm">{(username || '?').slice(0, 1).toUpperCase()}</span>
+        <span>{username || 'guest'}</span>
+        <ChevronDown size={13} />
+      </button>
+      {open && (
+        <div className="user-menu-pop">
+          <p>เซสชันของ {username}</p>
+          <button onClick={onLogout}><LogOut size={14} /> ออกจากระบบ</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function Topbar({
+  device,
+  status,
+  checking,
+  busy,
+  onRefresh,
+  onRetry,
+  username,
+  onLogout,
+}: {
+  device: Device | null
+  status: DeviceStatus | null
+  checking: boolean
+  busy: boolean
+  onRefresh: () => void
+  onRetry: () => void
+  username: string | null
+  onLogout: () => void
+}) {
+  return (
+    <header className="topbar">
+      <div className="topbar-left">
+        <div className="crumb"><span>CONSOLE</span><b>/</b><strong>{device?.name || '—'}</strong></div>
+        <StatusBadge status={status} checking={checking} />
+      </div>
+      <div className="topbar-right">
+        <button className="btn btn--ghost" onClick={onRetry} disabled={checking} title="ตรวจสอบสถานะใหม่">
+          <RefreshCw size={14} className={checking ? 'spin' : ''} />
+        </button>
+        <button className="btn btn--primary" onClick={onRefresh} disabled={busy || !status?.online}>
+          <Camera size={15} /> ถ่ายภาพหน้าจอ
+        </button>
+        <UserMenu username={username} onLogout={onLogout} />
+      </div>
+    </header>
   )
 }
 
 export function Footer({ health }: { health: Health | null }) {
   return (
     <footer className="footer">
-      <span>{health?.tagline || 'Build & release dashboard'}</span>
-      <span>
-        {health?.authenticated ? <><ShieldCheck size={13} /> server-side token · {health.tokenSource}</> : 'public GitHub API'}
-        {' · '}cache {health ? Math.round(health.cacheTtlMs / 1000) : 60}s
-      </span>
+      <span><ShieldCheck size={13} /> ทุกคำสั่งผ่าน signed session · ไม่มี token อยู่ในเบราว์เซอร์</span>
+      <span>{health?.protocolVersion || 'MCP 2025-11-25'} · {health?.platform || 'cloudflare'}</span>
     </footer>
+  )
+}
+
+// ---------------------------------------------------------------- tools
+
+function buildArgs(tool: ToolDescriptor, values: Record<string, string>): Record<string, unknown> {
+  const args: Record<string, unknown> = {}
+  for (const f of tool.fields) {
+    const raw = values[f.key]
+    if (raw === undefined || raw === '') continue
+    if (f.kind === 'int') args[f.key] = Number(raw)
+    else args[f.key] = raw
+  }
+  return args
+}
+
+function fieldInput(
+  f: ToolField,
+  value: string,
+  onChange: (v: string) => void,
+  disabled: boolean,
+) {
+  const common = {
+    id: `f-${f.key}`,
+    className: 'input',
+    value,
+    onChange: (e: { target: { value: string } }) => onChange(e.target.value),
+    disabled,
+    placeholder: f.placeholder || '',
+    required: f.required,
+  }
+  if (f.kind === 'points' || f.kind === 'pointers') {
+    return <textarea {...common} className="input textarea" rows={4} spellCheck={false} />
+  }
+  if (f.kind === 'text' && (f.maxLength || 0) > 200) {
+    return <textarea {...common} className="input textarea" rows={2} maxLength={f.maxLength} />
+  }
+  return (
+    <input
+      {...common}
+      type={f.kind === 'int' ? 'number' : 'text'}
+      min={f.kind === 'int' ? f.min : undefined}
+      max={f.kind === 'int' ? f.max : undefined}
+      maxLength={f.maxLength}
+    />
+  )
+}
+
+export function ToolForm({
+  tools,
+  onSubmit,
+  busy,
+  disabled,
+}: {
+  tools: ToolDescriptor[]
+  onSubmit: (tool: string, args: Record<string, unknown>) => void
+  busy: boolean
+  disabled: boolean
+}) {
+  const [activeName, setActiveName] = useState(tools[0]?.name || 'tap')
+  const [values, setValues] = useState<Record<string, string>>({})
+  const tool = useMemo(
+    () => tools.find((t) => t.name === activeName) || tools[0],
+    [tools, activeName],
+  )
+
+  useEffect(() => {
+    if (!tool) return
+    const next: Record<string, string> = {}
+    for (const f of tool.fields) next[f.key] = f.default === undefined ? '' : String(f.default)
+    setValues(next)
+  }, [tool])
+
+  if (!tool) return <Empty title="ไม่พบคำสั่ง" hint="ตรวจสอบ /api/tools" />
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    if (!busy && !disabled) onSubmit(tool.name, buildArgs(tool, values))
+  }
+
+  const groups = ['touch', 'keys', 'advanced']
+  const grouped = groups
+    .map((g) => ({ g, items: tools.filter((t) => t.group === g) }))
+    .filter((x) => x.items.length)
+
+  return (
+    <form className="tool-form" onSubmit={submit}>
+      {grouped.map(({ g, items }) => (
+        <div className="tool-group" key={g}>
+          <p className="tool-group-label">
+            {g === 'touch' ? 'TOUCH' : g === 'keys' ? 'KEYS & TEXT' : 'ADVANCED'}
+          </p>
+          <div className="tool-tabs">
+            {items.map((t) => (
+              <button
+                type="button"
+                key={t.name}
+                className={`tool-tab ${t.name === tool.name ? 'is-active' : ''}`}
+                onClick={() => setActiveName(t.name)}
+                title={t.description}
+              >
+                {toolIcon(t.name)}<span>{t.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <div className="tool-desc">{tool.description}</div>
+
+      <div className="tool-fields">
+        {tool.fields.map((f) => (
+          <div className={`tool-field tool-field--${f.kind}`} key={f.key}>
+            <label className="field-label" htmlFor={`f-${f.key}`}>
+              {f.label}{f.required && <em className="req">*</em>}
+            </label>
+            {fieldInput(f, values[f.key] ?? '', (v) => setValues((p) => ({ ...p, [f.key]: v })), disabled || busy)}
+            {f.hint && <p className="field-hint">{f.hint}</p>}
+          </div>
+        ))}
+        {tool.fields.length === 0 && (
+          <p className="tool-noargs">คำสั่งนี้ไม่ต้องระบุพารามิเตอร์</p>
+        )}
+      </div>
+
+      <button className="btn btn--primary btn--block" type="submit" disabled={busy || disabled}>
+        {busy ? <><Loader2 size={16} className="spin" /> กำลังส่งคำสั่ง…</> : <><Play size={15} /> ส่งคำสั่ง {tool.name}</>}
+      </button>
+      {disabled && <p className="tool-disabled-note">ปิดการส่งคำสั่งขณะอุปกรณ์ออฟไลน์</p>}
+    </form>
+  )
+}
+
+export function PresetBar({
+  presets,
+  onRun,
+  busy,
+  disabled,
+}: {
+  presets: Preset[]
+  onRun: (tool: string, args: Record<string, unknown>) => void
+  busy: boolean
+  disabled: boolean
+}) {
+  return (
+    <div className="preset-bar">
+      {presets.map((p) => (
+        <button
+          key={p.id}
+          className="preset-btn"
+          title={p.hint || p.label}
+          onClick={() => onRun(p.tool, p.arguments)}
+          disabled={busy || disabled}
+        >
+          {PRESET_ICONS[p.id] || <Zap size={15} />}
+          <span>{p.label}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- screen
+
+export function ScreenView({
+  screenshot,
+  busy,
+  disabled,
+  onTap,
+  onCapture,
+}: {
+  screenshot: Screenshot | null
+  busy: boolean
+  disabled: boolean
+  onTap: (x: string, y: string) => void
+  onCapture: () => void
+}) {
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
+
+  const handleMove = (e: MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    setCursor({
+      x: Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100)),
+      y: Math.min(100, Math.max(0, ((e.clientY - rect.top) / rect.height) * 100)),
+    })
+  }
+
+  const handleClick = (e: MouseEvent<HTMLDivElement>) => {
+    if (disabled || busy || !screenshot) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100))
+    const y = Math.min(100, Math.max(0, ((e.clientY - rect.top) / rect.height) * 100))
+    onTap(`${x.toFixed(1)}%`, `${y.toFixed(1)}%`)
+  }
+
+  const src = screenshot ? `data:${screenshot.mimeType};base64,${screenshot.data}` : null
+
+  return (
+    <div className="screen-wrap">
+      <div
+        className={`screen-frame ${disabled ? 'is-disabled' : ''} ${src ? 'has-image' : ''}`}
+        onMouseLeave={() => setCursor(null)}
+      >
+        {/* The stage sizes itself to the <img>, so % coords map to the real
+            picture even when the device aspect ratio differs from the frame. */}
+        <div
+          className="screen-stage"
+          onMouseMove={handleMove}
+          onClick={handleClick}
+          title={src && !disabled ? 'คลิกเพื่อส่งคำสั่ง tap ตามตำแหน่ง' : undefined}
+        >
+        {src ? (
+          <img className="screen-img" src={src} alt="หน้าจออุปกรณ์" draggable={false} />
+        ) : (
+          <div className="screen-placeholder">
+            <ScanLine size={38} />
+            <p>ยังไม่มีภาพหน้าจอ</p>
+            <span>กด «ถ่ายภาพหน้าจอ» เพื่อดึงภาพจากอุปกรณ์</span>
+            <button className="btn btn--ghost" onClick={(e) => { e.stopPropagation(); onCapture() }} disabled={busy || disabled}>
+              <Camera size={14} /> ถ่ายภาพเดี๋ยวนี้
+            </button>
+          </div>
+        )}
+
+        {src && cursor && !disabled && !busy && (
+          <>
+            <div className="screen-crosshair screen-crosshair--x" style={{ left: `${cursor.x}%` }} />
+            <div className="screen-crosshair screen-crosshair--y" style={{ top: `${cursor.y}%` }} />
+            <div className="screen-readout" style={{ left: `${cursor.x}%`, top: `${cursor.y}%` }}>
+              {cursor.x.toFixed(1)}% · {cursor.y.toFixed(1)}%
+            </div>
+          </>
+        )}
+
+        </div>
+
+        {busy && (
+          <div className="screen-overlay">
+            <Loader2 size={26} className="spin" />
+            <span>กำลังรอภาพจากอุปกรณ์…</span>
+          </div>
+        )}
+      </div>
+      <p className="screen-caption">
+        <MousePointer2 size={13} />
+        {src ? 'คลิกบนภาพเพื่อแตะ (tap) ตามเปอร์เซ็นต์ของหน้าจอ' : 'ภาพจะแสดงที่นี่หลังส่งคำสั่งสำเร็จ'}
+      </p>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- log
+
+function argsSummary(args?: Record<string, unknown>): string {
+  if (!args) return ''
+  const parts = Object.entries(args)
+    .slice(0, 3)
+    .map(([k, v]) => `${k}=${typeof v === 'string' && v.length > 24 ? `${v.slice(0, 24)}…` : String(v)}`)
+  return parts.join('  ')
+}
+
+export function CommandLog({
+  entries,
+  onClear,
+  onReplay,
+  disabled,
+}: {
+  entries: CommandLogEntry[]
+  onClear: () => void
+  onReplay: (entry: CommandLogEntry) => void
+  disabled: boolean
+}) {
+  return (
+    <div className="log-wrap">
+      <div className="log-head">
+        <span><Clock size={13} /> {entries.length} รายการ · เก็บในเบราว์เซอร์</span>
+        <button className="icon-btn" onClick={onClear} disabled={!entries.length} title="ล้างประวัติ" aria-label="ล้างประวัติ">
+          <Trash2 size={14} />
+        </button>
+      </div>
+      {entries.length === 0 ? (
+        <Empty icon={<Terminal size={20} />} title="ยังไม่มีคำสั่ง" hint="ประวัติจะแสดงที่นี่และคงอยู่หลังรีเฟรช" />
+      ) : (
+        <ul className="log-list">
+          {entries.map((e) => (
+            <li className={`log-item ${e.ok ? 'is-ok' : 'is-bad'}`} key={`${e.id}-${e.at}`}>
+              <span className="log-icon">
+                {e.ok ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
+              </span>
+              <div className="log-copy">
+                <div className="log-line">
+                  <strong>{e.tool}</strong>
+                  <span className="log-time">{fmtTime(e.at)}</span>
+                  {e.durationMs !== null && <span className="log-dur">{e.durationMs}ms</span>}
+                  {e.hasScreenshot && <Chip tone="info">ภาพจอ</Chip>}
+                </div>
+                <p className="log-args">{argsSummary(e.arguments) || (e.error ? e.error.message : '—')}</p>
+                {e.error && <p className="log-err">{e.error.code}: {e.error.message}</p>}
+              </div>
+              <button
+                className="icon-btn"
+                onClick={() => onReplay(e)}
+                disabled={disabled || !e.arguments}
+                title="ส่งคำสั่งซ้ำ"
+                aria-label="ส่งคำสั่งซ้ำ"
+              >
+                <Play size={13} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
