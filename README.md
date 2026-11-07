@@ -8,9 +8,9 @@ GitHub OAuth is restricted by `ALLOWED_GITHUB_USERS` (defaults to `Tulipskun`). 
 
 ## Cloudflare setup
 
-1. Create a D1 database named `aixodia-dashboard` and replace `database_id` in `wrangler.toml` with its ID.
+1. The existing Cloudflare D1 database `aixodia` is reused; its database ID is configured in `wrangler.toml`. The session migration adds a `sessions` table without replacing existing tables.
 2. Create a GitHub OAuth App. Set its callback URL to `https://dashboard.aixodia.dpdns.org/api/auth/github/callback`.
-3. Add these GitHub repository Actions secrets (never commit them): `CLOUDFLARE_API_TOKEN`, `DASHBOARD_D1_DATABASE_ID`, `DASHBOARD_GITHUB_CLIENT_ID`, and `DASHBOARD_GITHUB_CLIENT_SECRET`. Create the D1 database once in Cloudflare and store its database ID in `DASHBOARD_D1_DATABASE_ID`. The Cloudflare token needs Workers Scripts edit, D1 edit, and route edit access for the configured zone. The deploy workflow applies migrations, writes the two OAuth values as Worker secrets, then deploys. For a manual deploy, use:
+3. Add these GitHub repository Actions secrets (never commit them): `CLOUDFLARE_API_TOKEN`. The Cloudflare token needs Workers Scripts edit, D1 edit, and route edit access for the configured zone. To enable GitHub login, add repository Actions secrets `DASHBOARD_GITHUB_CLIENT_ID` and `DASHBOARD_GITHUB_CLIENT_SECRET`; the workflow copies them into Worker secrets during deployment. The GitHub OAuth App callback must be `https://dashboard.aixodia.dpdns.org/api/auth/github/callback`. For a manual deploy, use:
 
    ```sh
    printf '%s' "$GITHUB_CLIENT_ID" | npx wrangler secret put GITHUB_CLIENT_ID

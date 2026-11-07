@@ -4,8 +4,8 @@ compatibility_date = "2026-11-07"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "aixodia-dashboard"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_name = "aixodia"
+database_id = "e8e746ea-691e-43bf-9fe2-c4e4016f29a1"
 migrations_dir = "migrations"
 
 [assets]
