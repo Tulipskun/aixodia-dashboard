@@ -24,5 +24,5 @@ export function readCookie(request, name) {
   return null;
 }
 export function callbackUrl(request, env) {
-  return `${(env.APP_ORIGIN || new URL(request.url).origin).replace(/\/$/, '')}/auth/github/callback`;
+  return `${(env.APP_ORIGIN || new URL(request.url).origin).replace(/\/$/, '')}/sso/github/callback`;
 }
