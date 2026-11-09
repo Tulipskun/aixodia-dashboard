@@ -84,8 +84,22 @@ export default function App() {
   }
 
   return (
-    <main className="hello-world-screen" aria-label="Dashboard">
-      <span>hello world</span>
-    </main>
+    <div className="hello-world-layout">
+      <header className="hello-world-topbar">
+        <a className="hello-world-brand" href="/" aria-label="AIxodia Dashboard">
+          <span className="hello-world-brand-mark">A</span>
+          <span className="hello-world-brand-name">AIxodia</span>
+        </a>
+        <div className="hello-world-account">
+          <span className="hello-world-username">{session?.username ?? 'Signed in'}</span>
+          <button className="hello-world-logout" type="button" onClick={handleLogout}>
+            Sign out
+          </button>
+        </div>
+      </header>
+      <main className="hello-world-screen" aria-label="Dashboard">
+        <span>hello world</span>
+      </main>
+    </div>
   )
 }
