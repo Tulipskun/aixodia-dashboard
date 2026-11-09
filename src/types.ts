@@ -4,17 +4,11 @@ export interface Session {
   authenticated: boolean
   username: string | null
   expiresAt: string | null
-  platform: string
 }
 
 export interface Health {
   ok: boolean
-  platform: string
   authConfigured: boolean
-  mcpConfigured: boolean
-  protocolVersion: string
-  consoleName: string
-  time: string
 }
 
 export interface EngineMetrics {
@@ -93,7 +87,6 @@ export interface DeviceTool {
 }
 export interface DeviceToolsResponse {
   tools: DeviceTool[]
-  protocolVersion: string
 }
 export interface Screenshot {
   mimeType: string
