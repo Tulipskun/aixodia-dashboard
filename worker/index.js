@@ -1,6 +1,7 @@
 const SESSION_DAYS = 30;
 const RENEW_BEFORE_DAYS = 29;
 import { SESSION_COOKIE, STATE_COOKIE, cookie, clearCookie, randomToken, sha256, readCookie, callbackUrl } from './lib.js';
+import { getEngineStatus, proxyEngine, listDevices, getDeviceTools, callDeviceTool } from './integrations.js';
 
 function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
@@ -103,7 +104,15 @@ async function route(request, env) {
   const url = new URL(request.url);
   const path = url.pathname.startsWith('/sso/') ? url.pathname.replace('/sso/', '/api/auth/') : url.pathname;
   if (request.method === 'GET' && path === '/api/health') {
-    return json({ ok: true, platform: 'cloudflare-workers', authConfigured: isConfigured(env), mcpConfigured: Boolean(env.MCP_BASE_URL), mcpBaseUrl: env.MCP_BASE_URL || '', protocolVersion: '2025-11-25', deviceCount: 0, consoleName: 'AIxodia Device Console', time: new Date().toISOString() });
+    return json({
+      ok: true,
+      platform: 'cloudflare-workers',
+      authConfigured: isConfigured(env),
+      mcpConfigured: Boolean(env.DEVICE_TUNNELS && env.MCP_GATEWAY),
+      protocolVersion: '2025-11-25',
+      consoleName: 'AIxodia Dashboard',
+      time: new Date().toISOString(),
+    });
   }
   if (request.method === 'GET' && path === '/api/session') {
     const session = await authenticate(request, env);
@@ -117,12 +126,40 @@ async function route(request, env) {
     if (token && env.DB) await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(await sha256(token)).run();
     return json({ ok: true }, 200, { 'set-cookie': clearCookie(SESSION_COOKIE) });
   }
+
   const auth = await requireSession(request, env);
   if (auth.response) return auth.response;
-  if (auth.session.setCookie && request.method === 'GET' && path === '/api/config') {
-    return json({ error: 'MCP integration is not configured', code: 'MCP_NOT_CONFIGURED' }, 503, { 'set-cookie': auth.session.setCookie });
+  const sessionCookie = auth.session.setCookie;
+  const attachCookie = (response) => {
+    if (!sessionCookie) return response;
+    const headers = new Headers(response.headers);
+    headers.append('set-cookie', sessionCookie);
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  };
+  if (request.method !== 'GET' && !sameOrigin(request, env)) {
+    return json({ error: 'Invalid origin', code: 'CSRF_REJECTED' }, 403);
   }
-  return json({ error: 'MCP integration is not configured', code: 'MCP_NOT_CONFIGURED' }, 503, auth.session.setCookie ? { 'set-cookie': auth.session.setCookie } : {});
+
+  if (request.method === 'GET' && path === '/api/engine/status') {
+    return attachCookie(json(await getEngineStatus(env)));
+  }
+  if (path.startsWith('/api/engine/')) {
+    return attachCookie(await proxyEngine(request, env, path.slice('/api/engine'.length)));
+  }
+  if (request.method === 'GET' && path === '/api/devices') {
+    return attachCookie(await listDevices(env, { refresh: url.searchParams.get('refresh') === '1' }));
+  }
+  const toolsMatch = path.match(/^\/api\/devices\/([a-z0-9-]{1,32})\/tools$/);
+  if (request.method === 'GET' && toolsMatch) {
+    return attachCookie(await getDeviceTools(env, toolsMatch[1]));
+  }
+  const actionMatch = path.match(/^\/api\/devices\/([a-z0-9-]{1,32})\/action$/);
+  if (request.method === 'POST' && actionMatch) {
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body.tool !== 'string') return json({ error: 'Invalid device action', code: 'INVALID_REQUEST' }, 400);
+    return attachCookie(await callDeviceTool(env, actionMatch[1], body.tool, body.arguments || {}));
+  }
+  return json({ error: 'Not found', code: 'NOT_FOUND' }, 404, sessionCookie ? { 'set-cookie': sessionCookie } : {});
 }
 
 export default {

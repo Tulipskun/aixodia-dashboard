@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 
 import * as api from './api'
-import type { Health, Session } from './types'
+import type { Device, Health, Session } from './types'
+import { DashboardHome, DeviceControl, EngineChat } from './dashboard'
 import { Boot, LoginPage } from './components'
 
 type Phase = 'boot' | 'login' | 'home'
+type View = 'home' | 'chat' | 'device'
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>('boot')
   const [session, setSession] = useState<Session | null>(null)
+  const [view, setView] = useState<View>('home')
+  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
   const [health, setHealth] = useState<Health | null>(null)
   const [loginBusy, setLoginBusy] = useState(false)
   const [loginError, setLoginError] = useState<string | null>(null)
@@ -130,10 +134,10 @@ export default function App() {
   return (
     <div className="hello-world-layout">
       <header className="hello-world-topbar">
-        <a className="hello-world-brand" href="/" aria-label="AIxodia Dashboard">
+        <button className="hello-world-brand brand-button" type="button" onClick={() => { setView('home'); setSelectedDevice(null) }} aria-label="AIxodia Dashboard">
           <span className="hello-world-brand-mark">A</span>
           <span className="hello-world-brand-name">AIxodia</span>
-        </a>
+        </button>
         <div className="hello-world-account-menu" ref={accountMenuRef}>
           <button
             className="hello-world-account-trigger"
@@ -160,8 +164,17 @@ export default function App() {
           )}
         </div>
       </header>
-      <main className="hello-world-screen" aria-label="Dashboard">
-        <span>hello world</span>
+      <main className={`hello-world-screen app-content ${view !== 'home' ? 'is-subview' : ''}`} aria-label="Dashboard">
+        {view === 'home' && (
+          <DashboardHome
+            onOpenChat={() => setView('chat')}
+            onOpenDevice={device => { setSelectedDevice(device); setView('device') }}
+          />
+        )}
+        {view === 'chat' && <EngineChat onBack={() => setView('home')} />}
+        {view === 'device' && selectedDevice && (
+          <DeviceControl device={selectedDevice} onBack={() => setView('home')} />
+        )}
       </main>
       {logoutConfirmOpen && (
         <div

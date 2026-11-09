@@ -30,8 +30,11 @@ jobs:
         run: |
           printf '%s' "$GITHUB_CLIENT_ID" | npx wrangler secret put GITHUB_CLIENT_ID
           printf '%s' "$GITHUB_CLIENT_SECRET" | npx wrangler secret put GITHUB_CLIENT_SECRET
+      - name: Configure AIxodia engine access
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: printf '%s' "$CLOUDFLARE_API_TOKEN" | npx wrangler secret put CF_TOKEN
       - name: Deploy Worker and frontend
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: npx wrangler deploy
-

@@ -8,6 +8,14 @@ database_name = "aixodia"
 database_id = "e8e746ea-691e-43bf-9fe2-c4e4016f29a1"
 migrations_dir = "migrations"
 
+[[kv_namespaces]]
+binding = "DEVICE_TUNNELS"
+id = "9c094dd95b96473085eaaa625aefc383"
+
+[[services]]
+binding = "MCP_GATEWAY"
+service = "aixodia-mcp-gateway"
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"
