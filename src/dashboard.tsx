@@ -70,8 +70,8 @@ export function DashboardHome({ onOpenChat, onOpenDevice }: {
   useEffect(() => {
     void refreshEngine()
     void refreshDevices()
-    const engineTimer = window.setInterval(() => void refreshEngine(), 5000)
-    const deviceTimer = window.setInterval(() => void refreshDevices(), 10000)
+    const engineTimer = window.setInterval(() => { if (!document.hidden) void refreshEngine() }, 30000)
+    const deviceTimer = window.setInterval(() => { if (!document.hidden) void refreshDevices() }, 30000)
     return () => { window.clearInterval(engineTimer); window.clearInterval(deviceTimer) }
   }, [refreshEngine, refreshDevices])
 
