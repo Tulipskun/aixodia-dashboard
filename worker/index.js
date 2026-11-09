@@ -101,7 +101,7 @@ async function githubCallback(request, env) {
 }
 async function route(request, env) {
   const url = new URL(request.url);
-  const path = url.pathname;
+  const path = url.pathname.startsWith('/auth/') ? `/api${url.pathname}` : url.pathname;
   if (request.method === 'GET' && path === '/api/health') {
     return json({ ok: true, platform: 'cloudflare-workers', authConfigured: isConfigured(env), mcpConfigured: Boolean(env.MCP_BASE_URL), mcpBaseUrl: env.MCP_BASE_URL || '', protocolVersion: '2025-11-25', deviceCount: 0, consoleName: 'AIxodia Device Console', time: new Date().toISOString() });
   }
@@ -129,7 +129,7 @@ export default {
   async fetch(request, env) {
     try {
       const path = new URL(request.url).pathname;
-      if (!path.startsWith('/api/')) return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found', { status: 404 });
+      if (!path.startsWith('/api/') && !path.startsWith('/auth/')) return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found', { status: 404 });
       return await route(request, env);
     }
     catch { return json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500); }
