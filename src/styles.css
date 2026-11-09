@@ -647,19 +647,9 @@ body {
   contain: layout paint;
 }
 
-/* Consistent blue press-and-hold feedback for every enabled button. */
+/* Button touch behavior without forced pressed-state colors. */
 button,
 [role="button"] {
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
-}
-button:active:not(:disabled),
-[role="button"]:active:not([aria-disabled="true"]) {
-  background-color: #168bff !important;
-  border-color: #168bff !important;
-  color: #ffffff !important;
-  box-shadow: 0 0 0 3px rgba(22, 139, 255, 0.22) !important;
-  filter: none !important;
-  transform: none;
-  transition: none !important;
 }
