@@ -44,4 +44,3 @@ Provide an authenticated web entry point to the AIxodia Device Console for contr
 - Preserve security and connection status without distracting from sign-in.
 - Keep the experience legible and direct on touch and pointer devices.
 
-[executed on device: sub (b077ade3-f389-4866-b2f4-56c32fc0b833)]

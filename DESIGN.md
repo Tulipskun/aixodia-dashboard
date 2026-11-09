@@ -15,7 +15,7 @@ Follow the user-selected Canva reference “AIXODIA Responsive Login Website”:
 
 ## Typography
 
-- Display and Latin UI: Space Grotesk
+- Display and Latin UI: Saira
 - Thai UI: Noto Sans Thai
 - Body copy: 14–16px with generous line height
 - Keep headings short and high contrast; avoid gradient text.
@@ -33,4 +33,3 @@ Follow the user-selected Canva reference “AIXODIA Responsive Login Website”:
 - Visible keyboard focus, minimum 44px touch targets, reduced-motion support.
 - No page zoom or scrolling, as explicitly required for this login surface.
 
-[executed on device: sub (b077ade3-f389-4866-b2f4-56c32fc0b833)]

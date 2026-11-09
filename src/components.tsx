@@ -811,4 +811,3 @@ export function CommandLog({
   )
 }
 
-[executed on device: sub (b077ade3-f389-4866-b2f4-56c32fc0b833)]
