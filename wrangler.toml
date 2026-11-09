@@ -12,6 +12,7 @@ migrations_dir = "migrations"
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/sso/*"]
 
 [vars]
 ALLOWED_GITHUB_USERS = "Tulipskun"
