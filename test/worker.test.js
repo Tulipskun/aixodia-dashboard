@@ -20,5 +20,5 @@ test('cookie parser handles multiple cookies', () => {
 });
 test('OAuth callback uses the configured stable app origin', () => {
   const req = new Request('http://127.0.0.1:8787/api/auth/github');
-  assert.equal(callbackUrl(req, { APP_ORIGIN: 'https://dashboard.example.com/' }), 'https://dashboard.example.com/auth/github/callback');
+  assert.equal(callbackUrl(req, { APP_ORIGIN: 'https://dashboard.example.com/' }), 'https://dashboard.example.com/sso/github/callback');
 });
