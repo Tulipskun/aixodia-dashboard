@@ -944,3 +944,35 @@ button,
   .ax-login-bottomline { display: none; }
 }
 
+
+/* Minimal single-user sign-in */
+.ax-login-header-caption,
+.ax-login-story-copy,
+.ax-login-story-foot,
+.ax-orbit-label,
+.ax-login-bottomline,
+.ax-login-panel-top,
+.ax-login-panel-intro,
+.ax-login-secure,
+.ax-login-divider,
+.ax-login-warning,
+.ax-login-provider-note,
+.ax-login-footer { display: none !important; }
+.ax-login-layout { grid-template-columns: minmax(0, 1fr) minmax(330px, .9fr); gap: clamp(40px, 8vw, 120px); }
+.ax-login-story { display: flex; align-items: center; justify-content: center; min-height: 360px; }
+.ax-orbit-scene { width: min(100%, 500px); height: clamp(300px, 42vh, 430px); margin: 0; }
+.ax-login-panel { padding: clamp(30px, 4vw, 46px); }
+.ax-login-panel h2 { margin: 0 0 25px; font-family: 'Noto Sans Thai', sans-serif; font-size: 25px; font-weight: 600; letter-spacing: 0; }
+.ax-github-button > span:nth-child(2) { text-align: center; }
+@media (max-width: 700px) {
+  .ax-login-layout { gap: 8px; padding: 12px 0; }
+  .ax-login-story { min-height: 0; }
+  .ax-orbit-scene { width: min(100%, 280px); height: clamp(120px, 20vh, 165px); margin: 0 auto; }
+  .ax-login-panel { padding: 24px; }
+  .ax-login-panel h2 { margin-bottom: 20px; }
+}
+@media (max-width: 380px) {
+  .ax-orbit-scene { height: 105px; }
+  .ax-login-panel { padding: 20px; }
+}
+

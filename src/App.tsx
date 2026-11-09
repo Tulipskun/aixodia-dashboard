@@ -58,6 +58,18 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (phase !== 'home') return
+
+    const lockAuthenticatedHistory = () => {
+      window.history.pushState({ aixodiaAuthenticated: true }, '', window.location.href)
+    }
+
+    lockAuthenticatedHistory()
+    window.addEventListener('popstate', lockAuthenticatedHistory)
+    return () => window.removeEventListener('popstate', lockAuthenticatedHistory)
+  }, [phase])
+
+  useEffect(() => {
     if (!accountMenuOpen) return
     const handlePointerDown = (event: PointerEvent) => {
       if (!accountMenuRef.current?.contains(event.target as Node)) setAccountMenuOpen(false)
@@ -107,7 +119,6 @@ export default function App() {
   if (phase === 'login') {
     return (
       <LoginPage
-        info={null}
         onGithubLogin={handleGithubLogin}
         busy={loginBusy}
         error={loginError}
@@ -194,3 +205,4 @@ export default function App() {
     </div>
   )
 }
+

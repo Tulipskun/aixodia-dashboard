@@ -235,13 +235,11 @@ export function OfflineState({
 // ---------------------------------------------------------------- login
 
 export function LoginPage({
-  info,
   onGithubLogin,
   busy,
   error,
   health,
 }: {
-  info: ConsoleInfo | null
   onGithubLogin: () => void
   busy: boolean
   error: string | null
@@ -251,7 +249,7 @@ export function LoginPage({
     <main className="ax-login-page">
       <div className="ax-login-ambient" aria-hidden="true" />
       <header className="ax-login-header">
-        <a className="ax-login-wordmark" href="/" aria-label="AIxodia home">
+        <a className="ax-login-wordmark" href="/" aria-label="AIxodia">
           <svg className="ax-login-logo" viewBox="0 0 40 40" fill="none" aria-hidden="true">
             <circle cx="20" cy="20" r="14.5" stroke="currentColor" strokeOpacity=".42" />
             <circle cx="20" cy="20" r="8.5" stroke="currentColor" strokeOpacity=".7" />
@@ -263,18 +261,10 @@ export function LoginPage({
           </svg>
           <span>AI<span className="ax-login-wordmark-light">XODIA</span></span>
         </a>
-        <span className="ax-login-header-caption">DEVICE CONTROL · SECURE ACCESS</span>
       </header>
 
       <div className="ax-login-layout">
         <section className="ax-login-story" aria-labelledby="ax-login-headline">
-          <div className="ax-login-story-copy">
-            <h1 id="ax-login-headline">Intelligent systems.<br />Built for <span>developers.</span></h1>
-            <p className="ax-login-description">
-              {info?.subtitle || 'หน้าควบคุมอุปกรณ์ Android ผ่าน DroidIME MCP'}
-              <span>Connect your workspace and control your Android devices securely.</span>
-            </p>
-          </div>
           <div className="ax-orbit-scene" aria-hidden="true">
             <div className="ax-orbit-grid" />
             <div className="ax-orbit-halo" />
@@ -290,21 +280,11 @@ export function LoginPage({
               <circle cx="276" cy="242" r="4" /><circle cx="180" cy="48" r="3" />
             </svg>
             <div className="ax-orbit-core"><span /><i /><b /></div>
-            <span className="ax-orbit-label ax-orbit-label-a">CONNECTED</span>
-            <span className="ax-orbit-label ax-orbit-label-b">MCP NETWORK</span>
-          </div>
-          <div className="ax-login-story-foot">
-            <span className="ax-story-rule" />
-            <span>One workspace. Your devices. In sync.</span>
           </div>
         </section>
 
         <section className="ax-login-panel" aria-labelledby="ax-login-title">
-          <div className="ax-login-panel-top">
-            <div className="ax-login-panel-symbol"><Smartphone size={21} strokeWidth={1.7} /></div>
-          </div>
-          <h2 id="ax-login-title">Welcome to AIXODIA</h2>
-          <p className="ax-login-panel-intro">Sign in to continue to your workspace.</p>
+          <h2 id="ax-login-title">เข้าสู่ระบบ</h2>
 
           {error && <div className="ax-login-error"><ErrorBanner message={error} /></div>}
 
@@ -315,26 +295,10 @@ export function LoginPage({
             disabled={busy || !health?.authConfigured}
           >
             {busy ? <Loader2 size={19} className="spin" /> : <Github size={19} />}
-            <span>{busy ? 'กำลังเชื่อมต่อ GitHub…' : 'Continue with GitHub'}</span>
-            <span className="ax-github-arrow" aria-hidden="true">→</span>
+            <span>{busy ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบด้วย GitHub'}</span>
           </button>
-          <div className="ax-login-secure"><ShieldCheck size={14} /> Secure single sign-on with GitHub</div>
-
-          <div className="ax-login-divider"><span /></div>
-          <div className="ax-login-warning">
-            <ShieldCheck size={15} />
-            <p>console นี้ส่งคำสั่งไปยังอุปกรณ์จริง กรุณายืนยันตัวตนก่อนใช้งาน</p>
-          </div>
-          <p className="ax-login-provider-note">
-            {health?.authConfigured ? 'GitHub authentication is ready' : 'GitHub OAuth ยังไม่ได้ตั้งค่าบนเซิร์ฟเวอร์'}
-          </p>
-          <footer className="ax-login-footer">
-            <span><Wifi size={13} /> {health?.protocolVersion || 'MCP 2025-11-25'}</span>
-            <span>{health?.platform || 'cloudflare-workers'}</span>
-          </footer>
         </section>
       </div>
-      <div className="ax-login-bottomline"><span>AIxodia Device Console</span><span>SECURE · PRIVATE · CONNECTED</span></div>
     </main>
   )
 }
@@ -810,4 +774,5 @@ export function CommandLog({
     </div>
   )
 }
+
 
