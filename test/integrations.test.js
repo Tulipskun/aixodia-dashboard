@@ -118,7 +118,7 @@ test('MCP tools and device actions use protocol headers and capture observed scr
     },
   };
   const tools = await getDeviceTools(env, 'pixel-8');
-  assert.deepEqual((await tools.json()).tools, [{ name: 'tap' }]);
+  assert.deepEqual(await tools.json(), { tools: [{ name: 'tap' }] });
   const action = await callDeviceTool(env, 'pixel-8', 'tap', { x: 10, y: 20 });
   const value = await action.json();
   assert.equal(value.ok, true);

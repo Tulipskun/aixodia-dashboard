@@ -104,19 +104,11 @@ async function route(request, env) {
   const url = new URL(request.url);
   const path = url.pathname.startsWith('/sso/') ? url.pathname.replace('/sso/', '/api/auth/') : url.pathname;
   if (request.method === 'GET' && path === '/api/health') {
-    return json({
-      ok: true,
-      platform: 'cloudflare-workers',
-      authConfigured: isConfigured(env),
-      mcpConfigured: Boolean(env.DEVICE_TUNNELS && env.MCP_GATEWAY),
-      protocolVersion: '2025-11-25',
-      consoleName: 'AIxodia Dashboard',
-      time: new Date().toISOString(),
-    });
+    return json({ ok: true, authConfigured: isConfigured(env) });
   }
   if (request.method === 'GET' && path === '/api/session') {
     const session = await authenticate(request, env);
-    return json({ authenticated: Boolean(session), username: session?.username || null, expiresAt: session ? new Date(session.expiresAt * 1000).toISOString() : null, platform: 'cloudflare-workers' }, 200, session?.setCookie ? { 'set-cookie': session.setCookie } : {});
+    return json({ authenticated: Boolean(session), username: session?.username || null, expiresAt: session ? new Date(session.expiresAt * 1000).toISOString() : null }, 200, session?.setCookie ? { 'set-cookie': session.setCookie } : {});
   }
   if (request.method === 'GET' && path === '/api/auth/github') return githubStart(request, env);
   if (request.method === 'GET' && path === '/api/auth/github/callback') return githubCallback(request, env);

@@ -68,10 +68,29 @@ export default function App() {
       window.history.pushState({ aixodiaAuthenticated: true }, '', window.location.href)
     }
 
+    window.history.replaceState({ aixodiaAuthenticated: true }, '', window.location.href)
     lockAuthenticatedHistory()
     window.addEventListener('popstate', lockAuthenticatedHistory)
     return () => window.removeEventListener('popstate', lockAuthenticatedHistory)
   }, [phase])
+
+  // OAuth is a full-page redirect. If Back restores the pre-login document
+  // from BFCache, re-check the server session before showing the login screen.
+  useEffect(() => {
+    const restoreAuthenticatedPage = async (event: PageTransitionEvent) => {
+      if (!event.persisted) return
+      setPhase('boot')
+      try {
+        const currentSession = await api.getSession()
+        setSession(currentSession)
+        setPhase(currentSession.authenticated ? 'home' : 'login')
+      } catch {
+        setPhase('login')
+      }
+    }
+    window.addEventListener('pageshow', restoreAuthenticatedPage)
+    return () => window.removeEventListener('pageshow', restoreAuthenticatedPage)
+  }, [])
 
   useEffect(() => {
     if (!accountMenuOpen) return

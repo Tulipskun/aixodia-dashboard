@@ -938,10 +938,8 @@ button,
 .metric-label { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 10.5px; }
 .metric-label svg { color: #9d96ff; }
 .metric-stat strong { display: block; margin-top: 7px; color: var(--text); font-size: 18px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.metric-foot { display: block; margin-top: 3px; color: var(--dim); font: 10px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .metric-bar { height: 3px; margin-top: 8px; border-radius: 5px; background: rgba(145,142,255,.12); overflow: hidden; }
 .metric-bar span { height: 100%; display: block; border-radius: inherit; background: linear-gradient(90deg,#6a63e9,#62d9cb); transition: width .3s ease; }
-.service-warning { margin: -6px 0 0; color: #f2a7b7; font-size: 11px; }
 .service-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 4px; }
 .updated-at { color: var(--dim); font-size: 10.5px; }
 .action-button {
@@ -998,3 +996,5 @@ button,
 .chat-session-list { min-height: 0; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
 .chat-session-item { width: 100%; min-height: 36px; display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); text-align: left; font-size: 11px; cursor: pointer; }
 .chat-session-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-session-item:hover, .chat-session-item.is-selected { background: rgba(119,114,255,.1); color: var(--text); border-color: rgba(119,114,255,.18); }
+.chat-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
