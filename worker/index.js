@@ -1,5 +1,7 @@
 const SESSION_DAYS = 30;
 const RENEW_BEFORE_DAYS = 29;
+const SESSION_CACHE_TTL_MS = 15_000;
+const sessionCache = new Map();
 import { SESSION_COOKIE, STATE_COOKIE, cookie, clearCookie, randomToken, sha256, readCookie, callbackUrl } from './lib.js';
 import { getEngineStatus, proxyEngine, listDevices, getDeviceTools, callDeviceTool } from './integrations.js';
 
@@ -23,20 +25,39 @@ async function createSession(env, username, githubId) {
   ).bind(await sha256(token), String(githubId), username, now, now, expires).run();
   return { token, expiresAt: new Date(expires * 1000).toISOString() };
 }
+function cacheSession(hash, row) {
+  if (sessionCache.size >= 2048) {
+    const oldest = sessionCache.keys().next().value;
+    if (oldest) sessionCache.delete(oldest);
+  }
+  sessionCache.set(hash, { row, expiresAt: Date.now() + SESSION_CACHE_TTL_MS });
+}
 async function authenticate(request, env) {
   const token = readCookie(request, SESSION_COOKIE);
   if (!token || !env.DB) return null;
   const hash = await sha256(token);
   const now = Math.floor(Date.now() / 1000);
-  const row = await env.DB.prepare(
-    'SELECT github_id, username, expires_at FROM sessions WHERE token_hash = ? AND expires_at > ?'
-  ).bind(hash, now).first();
-  if (!row) return null;
+  const cached = sessionCache.get(hash);
+  let row = cached && cached.expiresAt > Date.now() ? cached.row : null;
+  if (!row) {
+    sessionCache.delete(hash);
+    row = await env.DB.prepare(
+      'SELECT github_id, username, expires_at FROM sessions WHERE token_hash = ? AND expires_at > ?'
+    ).bind(hash, now).first();
+    if (!row) return null;
+    cacheSession(hash, row);
+  }
+  if (row.expires_at <= now) {
+    sessionCache.delete(hash);
+    return null;
+  }
   const renew = row.expires_at - now < RENEW_BEFORE_DAYS * 86400;
   if (renew) {
     const expires = now + SESSION_DAYS * 86400;
     await env.DB.prepare('UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE token_hash = ?')
       .bind(now, expires, hash).run();
+    row = { ...row, expires_at: expires };
+    cacheSession(hash, row);
     return { username: row.username, githubId: row.github_id, expiresAt: expires, setCookie: cookie(SESSION_COOKIE, token, SESSION_DAYS * 86400) };
   }
   return { username: row.username, githubId: row.github_id, expiresAt: row.expires_at, setCookie: null };
@@ -115,7 +136,11 @@ async function route(request, env) {
   if (request.method === 'POST' && path === '/api/logout') {
     if (!sameOrigin(request, env)) return json({ error: 'Invalid origin', code: 'CSRF_REJECTED' }, 403);
     const token = readCookie(request, SESSION_COOKIE);
-    if (token && env.DB) await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(await sha256(token)).run();
+    if (token && env.DB) {
+      const hash = await sha256(token);
+      sessionCache.delete(hash);
+      await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(hash).run();
+    }
     return json({ ok: true }, 200, { 'set-cookie': clearCookie(SESSION_COOKIE) });
   }
 

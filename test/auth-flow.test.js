@@ -4,8 +4,10 @@ import worker from '../worker/index.js';
 
 function fakeDb() {
   const rows = new Map();
+  let selectCount = 0;
   return {
     rows,
+    get selectCount() { return selectCount; },
     prepare(sql) {
       return { bind(...values) {
         return {
@@ -26,6 +28,7 @@ function fakeDb() {
           },
           async first() {
             if (sql.startsWith('SELECT github_id')) {
+              selectCount++;
               const [hash, now] = values;
               const row = rows.get(hash);
               return row && row.expires_at > now ? row : null;
@@ -78,18 +81,22 @@ test('GitHub OAuth creates a D1 session, restores it from cookie, renews it, and
     const health = await healthResponse.json();
     assert.deepEqual(health, { ok: true, authConfigured: true });
 
+    const [hash, row] = [...db.rows.entries()][0];
+    row.expires_at = Math.floor(Date.now() / 1000) + 86400;
     const sessionResponse = await worker.fetch(new Request('https://dashboard.example.test/api/session', { headers: { cookie: sessionPair } }), env);
     const session = await sessionResponse.json();
     assert.equal(session.authenticated, true);
     assert.equal(session.username, 'Tulipskun');
     assert.equal('platform' in session, false);
-
-    const [hash, row] = [...db.rows.entries()][0];
-    row.expires_at = Math.floor(Date.now() / 1000) + 86400;
-    const renewed = await worker.fetch(new Request('https://dashboard.example.test/api/session', { headers: { cookie: sessionPair } }), env);
-    assert.equal(renewed.status, 200);
-    assert.ok(renewed.headers.get('set-cookie').includes('Max-Age=2592000'));
+    assert.ok(sessionResponse.headers.get('set-cookie').includes('Max-Age=2592000'));
     assert.ok(db.rows.get(hash).expires_at > Math.floor(Date.now() / 1000) + 29 * 86400);
+
+    const selectsAfterFirstAuth = db.selectCount;
+    for (let i = 0; i < 5; i++) {
+      const cached = await worker.fetch(new Request('https://dashboard.example.test/api/session', { headers: { cookie: sessionPair } }), env);
+      assert.equal((await cached.json()).authenticated, true);
+    }
+    assert.equal(db.selectCount, selectsAfterFirstAuth, 'realtime requests should reuse the short-lived in-memory auth result');
 
     const logout = await worker.fetch(new Request('https://dashboard.example.test/api/logout', { method: 'POST', headers: { cookie: sessionPair, origin: 'https://dashboard.example.test' } }), env);
     assert.equal(logout.status, 200);
