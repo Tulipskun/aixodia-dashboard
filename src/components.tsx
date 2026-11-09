@@ -10,7 +10,9 @@ import {
 import {
   Activity,
   AlertTriangle,
+  Atom,
   ArrowLeft,
+  ArrowRight,
   Camera,
   CheckCircle2,
   ChevronDown,
@@ -234,6 +236,53 @@ export function OfflineState({
 
 // ---------------------------------------------------------------- login
 
+function LoginOrbitalArtwork() {
+  return (
+    <svg className="login-orbit-art" viewBox="0 0 620 360" aria-hidden="true" focusable="false">
+      <defs>
+        <radialGradient id="login-core-glow">
+          <stop offset="0" stopColor="#8d6bff" stopOpacity="0.9" />
+          <stop offset="0.42" stopColor="#4b43ff" stopOpacity="0.28" />
+          <stop offset="1" stopColor="#171dff" stopOpacity="0" />
+        </radialGradient>
+        <linearGradient id="login-orbit-stroke" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#5e4cff" stopOpacity="0.12" />
+          <stop offset="0.52" stopColor="#7d68ff" stopOpacity="0.9" />
+          <stop offset="1" stopColor="#29c9ff" stopOpacity="0.16" />
+        </linearGradient>
+        <linearGradient id="login-grid-stroke" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#6559ff" stopOpacity="0.34" />
+          <stop offset="1" stopColor="#1b8bff" stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      <g className="login-perspective-grid" fill="none" stroke="url(#login-grid-stroke)" strokeWidth="1">
+        <path d="M42 274 L578 274 M64 292 L556 292 M91 312 L529 312 M124 333 L496 333" />
+        <path d="M310 214 L42 274 M310 214 L92 312 M310 214 L164 333 M310 214 L238 344 M310 214 L382 344 M310 214 L456 333 M310 214 L528 312 M310 214 L578 274" />
+      </g>
+      <circle cx="310" cy="164" r="104" fill="url(#login-core-glow)" />
+      <g fill="none" stroke="url(#login-orbit-stroke)" strokeWidth="1.25">
+        <ellipse cx="310" cy="164" rx="170" ry="62" transform="rotate(-24 310 164)" />
+        <ellipse cx="310" cy="164" rx="170" ry="62" transform="rotate(34 310 164)" />
+        <ellipse cx="310" cy="164" rx="118" ry="43" transform="rotate(90 310 164)" />
+        <path d="M178 104 L310 164 L435 205 M220 231 L310 164 L388 86" strokeOpacity="0.58" />
+      </g>
+      <g fill="#6d63ff" stroke="#c5bdff" strokeWidth="1.4">
+        <circle cx="310" cy="164" r="10" fill="#8b72ff" />
+        <circle cx="178" cy="104" r="7" />
+        <circle cx="435" cy="205" r="6" fill="#36c8ff" />
+        <circle cx="388" cy="86" r="5" fill="#36c8ff" />
+        <circle cx="220" cy="231" r="5" />
+        <circle cx="310" cy="53" r="4" fill="#36c8ff" />
+      </g>
+      <g fill="#b8b0ff" opacity="0.85">
+        <circle cx="118" cy="166" r="1.8" /><circle cx="494" cy="126" r="1.6" />
+        <circle cx="468" cy="255" r="1.8" /><circle cx="248" cy="70" r="1.5" />
+        <circle cx="350" cy="254" r="1.4" /><circle cx="148" cy="246" r="1.4" />
+      </g>
+    </svg>
+  )
+}
+
 export function LoginPage({
   info,
   onGithubLogin,
@@ -247,43 +296,66 @@ export function LoginPage({
   error: string | null
   health: Health | null
 }) {
+  const brandName = info?.name || 'AIXODIA'
+
   return (
     <div className="login-page">
       <div className="login-glow" aria-hidden="true" />
-      <div className="login-card">
-        <div className="login-brand">
-          <div className="login-mark"><Smartphone size={24} /></div>
-          <div>
-            <h1>{info?.name || 'AIxodia Device Console'}</h1>
-            <p>{info?.subtitle || 'หน้าควบคุมอุปกรณ์ Android ผ่าน DroidIME MCP'}</p>
+      <header className="login-header">
+        <span className="login-header-rule" />
+        <a className="login-header-brand" href="/" aria-label="AIxodia home">
+          <Atom size={34} strokeWidth={1.55} aria-hidden="true" />
+          <span>{brandName}</span>
+        </a>
+        <span className="login-header-rule" />
+      </header>
+
+      <main className="login-layout">
+        <section className="login-story" aria-labelledby="login-story-title">
+          <div className="login-story-brand">
+            <Atom size={21} strokeWidth={1.6} aria-hidden="true" />
+            <span>{brandName}</span>
           </div>
-        </div>
+          <h1 id="login-story-title">Intelligent systems.<br />Built for <span>developers.</span></h1>
+          <p className="login-story-copy">
+            AIXODIA empowers you to build, connect, and scale AI-driven experiences with confidence.
+          </p>
+          <LoginOrbitalArtwork />
+        </section>
 
-        <div className="login-warning">
-          <ShieldCheck size={16} />
-          <span>console นี้ส่งคำสั่งไปยังอุปกรณ์จริง กรุณายืนยันตัวตนก่อนใช้งาน</span>
-        </div>
+        <section className="login-card" aria-labelledby="login-card-title">
+          <div className="login-card-emblem"><Atom size={25} strokeWidth={1.6} aria-hidden="true" /></div>
+          <div className="login-card-heading">
+            <h2 id="login-card-title">Welcome to {brandName}</h2>
+            <p>Sign in to continue to your workspace</p>
+          </div>
 
-        {error && <ErrorBanner message={error} />}
+          {error && <ErrorBanner message={error} />}
 
-        <button
-          className="github-login-btn"
-          type="button"
-          onClick={onGithubLogin}
-          disabled={busy || !health?.authConfigured}
-        >
-          {busy ? <Loader2 size={19} className="spin" /> : <Github size={19} />}
-          <span>{busy ? 'กำลังเชื่อมต่อ GitHub…' : 'Continue with GitHub'}</span>
-          <span className="github-login-arrow">→</span>
-        </button>
+          <button
+            className="github-login-btn"
+            type="button"
+            onClick={onGithubLogin}
+            disabled={busy || !health?.authConfigured}
+          >
+            {busy ? <Loader2 size={19} className="spin" /> : <Github size={19} />}
+            <span>{busy ? 'กำลังเชื่อมต่อ GitHub…' : 'Continue with GitHub'}</span>
+            <ArrowRight className="github-login-arrow" size={18} aria-hidden="true" />
+          </button>
 
-        <p className="login-provider-note">{health?.authConfigured ? 'Sign in securely with your GitHub account' : 'GitHub OAuth ยังไม่ได้ตั้งค่าบนเซิร์ฟเวอร์'}</p>
+          <div className={`login-secure-note${health?.authConfigured ? '' : ' is-unavailable'}`}>
+            <ShieldCheck size={14} aria-hidden="true" />
+            <span>{health?.authConfigured ? 'Secure single sign-on via GitHub' : 'GitHub OAuth ยังไม่ได้ตั้งค่าบนเซิร์ฟเวอร์'}</span>
+          </div>
+          <p className="login-terms">By continuing, you agree to the Terms and Privacy Policy.</p>
+          <p className="login-context-note">คอนโซลนี้ส่งคำสั่งไปยังอุปกรณ์จริง กรุณายืนยันตัวตนก่อนใช้งาน</p>
 
-        <div className="login-foot">
-          <span><Wifi size={13} /> {health?.protocolVersion || 'MCP 2025-11-25'}</span>
-          <span>{health?.platform || 'cloudflare'}</span>
-        </div>
-      </div>
+          <div className="login-foot">
+            <span><Wifi size={13} /> {health?.protocolVersion || 'MCP 2025-11-25'}</span>
+            <span>{health?.platform || 'cloudflare'}</span>
+          </div>
+        </section>
+      </main>
     </div>
   )
 }
