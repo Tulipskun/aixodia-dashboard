@@ -56,7 +56,7 @@ export default function App() {
   const handleGithubLogin = () => {
     setLoginBusy(true)
     setLoginError(null)
-    window.location.assign('/api/auth/github')
+    window.location.assign('/auth/github')
   }
 
   const handleLogout = async () => {
