@@ -55,11 +55,11 @@ test('GitHub OAuth creates a D1 session, restores it from cookie, renews it, and
     throw new Error(`Unexpected fetch: ${url}`);
   };
   try {
-    const start = await worker.fetch(new Request('https://dashboard.example.test/auth/github'), env);
+    const start = await worker.fetch(new Request('https://dashboard.example.test/sso/github'), env);
     assert.equal(start.status, 302);
     const authUrl = new URL(start.headers.get('location'));
     assert.equal(authUrl.origin, 'https://github.com');
-    assert.equal(authUrl.searchParams.get('redirect_uri'), 'https://dashboard.example.test/auth/github/callback');
+    assert.equal(authUrl.searchParams.get('redirect_uri'), 'https://dashboard.example.test/sso/github/callback');
     const stateCookie = start.headers.get('set-cookie').split(';')[0];
     const state = stateCookie.split('=').slice(1).join('=');
     const callback = await worker.fetch(new Request(`https://dashboard.example.test/api/auth/github/callback?code=oauth-code&state=${state}`, { headers: { cookie: stateCookie } }), env);
