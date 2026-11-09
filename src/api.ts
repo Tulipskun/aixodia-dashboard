@@ -1,13 +1,15 @@
 import type {
-  ActionResult,
   ApiErrorBody,
-  CommandsResponse,
-  ConsoleConfig,
-  DeviceStatus,
+  DeviceActionResult,
+  DeviceToolsResponse,
   DevicesResponse,
+  EngineEvent,
+  EngineRun,
+  EngineSession,
+  EngineStatus,
+  EngineTurn,
   Health,
   Session,
-  ToolsResponse,
 } from './types'
 
 export class ApiError extends Error {
@@ -43,67 +45,71 @@ function buildHeaders(init: RequestInit): Record<string, string> {
   return headers
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  let res: Response
+async function fetchResponse(path: string, init: RequestInit = {}): Promise<Response> {
   try {
-    res = await fetch(path, {
+    return await fetch(path, {
       credentials: 'same-origin',
+      cache: 'no-store',
       ...init,
       headers: buildHeaders(init),
     })
   } catch {
     throw new ApiError(0, { error: 'Unable to connect to the server.', code: 'NETWORK_ERROR' })
   }
-
+}
+function errorBody(data: unknown, status: number): ApiErrorBody {
+  const raw = (data && typeof data === 'object' ? data : {}) as Partial<ApiErrorBody>
+  return { error: raw.error || `HTTP ${status}`, code: raw.code || 'HTTP_ERROR', ...raw }
+}
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetchResponse(path, init)
   const text = await res.text()
   let data: unknown = null
   if (text) {
     try { data = JSON.parse(text) } catch { data = null }
   }
-
   if (!res.ok) {
-    // A 401 on /api/session is expected while logged out — never redirect-loop.
-    if (res.status === 401 && path !== '/api/login' && path !== '/api/session') {
-      onUnauthorized?.()
-    }
-    const raw = (data && typeof data === 'object' ? data : {}) as Partial<ApiErrorBody>
-    throw new ApiError(res.status, {
-      error: raw.error || `HTTP ${res.status}`,
-      code: raw.code || 'HTTP_ERROR',
-      ...raw,
-    })
+    if (res.status === 401 && path !== '/api/session') onUnauthorized?.()
+    throw new ApiError(res.status, errorBody(data, res.status))
   }
   return data as T
 }
-
+async function requestText(path: string): Promise<string> {
+  const res = await fetchResponse(path)
+  const text = await res.text()
+  if (!res.ok) {
+    let data: unknown = null
+    try { data = JSON.parse(text) } catch { data = null }
+    if (res.status === 401) onUnauthorized?.()
+    throw new ApiError(res.status, errorBody(data, res.status))
+  }
+  return text
+}
 const post = <T,>(path: string, body: unknown) =>
   request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) })
 
 export const getSession = () => request<Session>('/api/session')
 export const getHealth = () => request<Health>('/api/health')
-
 export const logout = () => post<{ ok: boolean }>('/api/logout', {})
 
-export const getConfig = () => request<ConsoleConfig>('/api/config')
-export const getDevices = () => request<DevicesResponse>('/api/devices')
+export const getEngineStatus = () => request<EngineStatus>('/api/engine/status')
+export const getEngineSessions = () => request<{ sessions: EngineSession[] }>('/api/engine/v1/sessions')
+export const createEngineSession = (title = 'New chat') =>
+  request<EngineSession>('/api/engine/v1/sessions', { method: 'POST', body: JSON.stringify({ title }) })
+export const getEngineTurns = (id: string) =>
+  request<{ turns: EngineTurn[] }>(`/api/engine/v1/sessions/${encodeURIComponent(id)}/turns?limit=100`)
+export const deleteEngineSession = (id: string) =>
+  request<{ deleted: boolean }>(`/api/engine/v1/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
+export const startEngineRun = (sessionId: string, message: string) =>
+  post<{ run: EngineRun }>('/api/engine/v1/runs', { session_id: sessionId, message })
+export const getEngineEvents = (runId: string, after: number) =>
+  requestText(`/api/engine/v1/runs/${encodeURIComponent(runId)}/events?after=${after}&poll=1`)
+export const cancelEngineRun = (runId: string) =>
+  post<{ run: EngineRun }>(`/api/engine/v1/runs/${encodeURIComponent(runId)}/cancel`, {})
 
-export const getDeviceStatus = (id: string, refresh = false) =>
-  request<DeviceStatus>(
-    `/api/devices/${encodeURIComponent(id)}/status${refresh ? '?refresh=1' : ''}`,
-  )
-
-export const getTools = () => request<ToolsResponse>('/api/tools')
-
-export const postAction = (
-  device: string,
-  tool: string,
-  args: Record<string, unknown>,
-  requestId?: string,
-) =>
-  post<ActionResult>(`/api/devices/${encodeURIComponent(device)}/action`, {
-    tool,
-    arguments: args,
-    requestId,
-  })
-
-export const getCommands = () => request<CommandsResponse>('/api/commands')
+export const getDevices = (refresh = false) =>
+  request<DevicesResponse>(`/api/devices${refresh ? '?refresh=1' : ''}`)
+export const getDeviceTools = (id: string) =>
+  request<DeviceToolsResponse>(`/api/devices/${encodeURIComponent(id)}/tools`)
+export const callDeviceTool = (id: string, tool: string, args: Record<string, unknown> = {}) =>
+  post<DeviceActionResult>(`/api/devices/${encodeURIComponent(id)}/action`, { tool, arguments: args })
