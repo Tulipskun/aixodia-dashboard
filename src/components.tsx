@@ -248,43 +248,94 @@ export function LoginPage({
   health: Health | null
 }) {
   return (
-    <div className="login-page">
-      <div className="login-glow" aria-hidden="true" />
-      <div className="login-card">
-        <div className="login-brand">
-          <div className="login-mark"><Smartphone size={24} /></div>
-          <div>
-            <h1>{info?.name || 'AIxodia Device Console'}</h1>
-            <p>{info?.subtitle || 'หน้าควบคุมอุปกรณ์ Android ผ่าน DroidIME MCP'}</p>
+    <main className="ax-login-page">
+      <div className="ax-login-ambient" aria-hidden="true" />
+      <header className="ax-login-header">
+        <a className="ax-login-wordmark" href="/" aria-label="AIxodia home">
+          <svg className="ax-login-logo" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+            <circle cx="20" cy="20" r="14.5" stroke="currentColor" strokeOpacity=".42" />
+            <circle cx="20" cy="20" r="8.5" stroke="currentColor" strokeOpacity=".7" />
+            <path d="M20 2.5v8M20 29.5v8M2.5 20h8M29.5 20h8M7.6 7.6l5.7 5.7m13.4 13.4 5.7 5.7m0-24.8-5.7 5.7m-13.4 13.4-5.7 5.7" stroke="currentColor" strokeWidth="1.2" />
+            <circle cx="20" cy="20" r="3.5" fill="currentColor" />
+            <circle cx="20" cy="5.5" r="2" fill="#28c9f5" />
+            <circle cx="34.5" cy="20" r="2" fill="#8b65ff" />
+            <circle cx="8" cy="10" r="1.7" fill="#8b65ff" />
+          </svg>
+          <span>AI<span className="ax-login-wordmark-light">XODIA</span></span>
+        </a>
+        <span className="ax-login-header-caption">DEVICE CONTROL · SECURE ACCESS</span>
+      </header>
+
+      <div className="ax-login-layout">
+        <section className="ax-login-story" aria-labelledby="ax-login-headline">
+          <div className="ax-login-story-copy">
+            <h1 id="ax-login-headline">Intelligent systems.<br />Built for <span>developers.</span></h1>
+            <p className="ax-login-description">
+              {info?.subtitle || 'หน้าควบคุมอุปกรณ์ Android ผ่าน DroidIME MCP'}
+              <span>Connect your workspace and control your Android devices securely.</span>
+            </p>
           </div>
-        </div>
+          <div className="ax-orbit-scene" aria-hidden="true">
+            <div className="ax-orbit-grid" />
+            <div className="ax-orbit-halo" />
+            <div className="ax-orbit-ring ax-orbit-ring-one" />
+            <div className="ax-orbit-ring ax-orbit-ring-two" />
+            <div className="ax-orbit-ring ax-orbit-ring-three" />
+            <svg className="ax-orbit-lines" viewBox="0 0 420 320" fill="none">
+              <path d="M210 160 132 106 92 174 210 160 292 93 330 177 210 160 276 242 132 106" />
+              <path d="M132 106 180 48 210 160 276 242 330 177" />
+              <path d="M92 174 180 48 292 93 276 242" />
+              <circle cx="132" cy="106" r="4" /><circle cx="92" cy="174" r="3" />
+              <circle cx="292" cy="93" r="4" /><circle cx="330" cy="177" r="3" />
+              <circle cx="276" cy="242" r="4" /><circle cx="180" cy="48" r="3" />
+            </svg>
+            <div className="ax-orbit-core"><span /><i /><b /></div>
+            <span className="ax-orbit-label ax-orbit-label-a">CONNECTED</span>
+            <span className="ax-orbit-label ax-orbit-label-b">MCP NETWORK</span>
+          </div>
+          <div className="ax-login-story-foot">
+            <span className="ax-story-rule" />
+            <span>One workspace. Your devices. In sync.</span>
+          </div>
+        </section>
 
-        <div className="login-warning">
-          <ShieldCheck size={16} />
-          <span>console นี้ส่งคำสั่งไปยังอุปกรณ์จริง กรุณายืนยันตัวตนก่อนใช้งาน</span>
-        </div>
+        <section className="ax-login-panel" aria-labelledby="ax-login-title">
+          <div className="ax-login-panel-top">
+            <div className="ax-login-panel-symbol"><Smartphone size={21} strokeWidth={1.7} /></div>
+          </div>
+          <h2 id="ax-login-title">Welcome to AIXODIA</h2>
+          <p className="ax-login-panel-intro">Sign in to continue to your workspace.</p>
 
-        {error && <ErrorBanner message={error} />}
+          {error && <div className="ax-login-error"><ErrorBanner message={error} /></div>}
 
-        <button
-          className="github-login-btn"
-          type="button"
-          onClick={onGithubLogin}
-          disabled={busy || !health?.authConfigured}
-        >
-          {busy ? <Loader2 size={19} className="spin" /> : <Github size={19} />}
-          <span>{busy ? 'กำลังเชื่อมต่อ GitHub…' : 'Continue with GitHub'}</span>
-          <span className="github-login-arrow">→</span>
-        </button>
+          <button
+            className="ax-github-button"
+            type="button"
+            onClick={onGithubLogin}
+            disabled={busy || !health?.authConfigured}
+          >
+            {busy ? <Loader2 size={19} className="spin" /> : <Github size={19} />}
+            <span>{busy ? 'กำลังเชื่อมต่อ GitHub…' : 'Continue with GitHub'}</span>
+            <span className="ax-github-arrow" aria-hidden="true">→</span>
+          </button>
+          <div className="ax-login-secure"><ShieldCheck size={14} /> Secure single sign-on with GitHub</div>
 
-        <p className="login-provider-note">{health?.authConfigured ? 'Sign in securely with your GitHub account' : 'GitHub OAuth ยังไม่ได้ตั้งค่าบนเซิร์ฟเวอร์'}</p>
-
-        <div className="login-foot">
-          <span><Wifi size={13} /> {health?.protocolVersion || 'MCP 2025-11-25'}</span>
-          <span>{health?.platform || 'cloudflare'}</span>
-        </div>
+          <div className="ax-login-divider"><span /></div>
+          <div className="ax-login-warning">
+            <ShieldCheck size={15} />
+            <p>console นี้ส่งคำสั่งไปยังอุปกรณ์จริง กรุณายืนยันตัวตนก่อนใช้งาน</p>
+          </div>
+          <p className="ax-login-provider-note">
+            {health?.authConfigured ? 'GitHub authentication is ready' : 'GitHub OAuth ยังไม่ได้ตั้งค่าบนเซิร์ฟเวอร์'}
+          </p>
+          <footer className="ax-login-footer">
+            <span><Wifi size={13} /> {health?.protocolVersion || 'MCP 2025-11-25'}</span>
+            <span>{health?.platform || 'cloudflare-workers'}</span>
+          </footer>
+        </section>
       </div>
-    </div>
+      <div className="ax-login-bottomline"><span>AIxodia Device Console</span><span>SECURE · PRIVATE · CONNECTED</span></div>
+    </main>
   )
 }
 
@@ -759,3 +810,4 @@ export function CommandLog({
     </div>
   )
 }
+
