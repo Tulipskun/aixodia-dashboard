@@ -1,7 +1,4 @@
-const ACCOUNT_ID = "3b953d1cbb784b3424c27798931bc37b";
-const CONFIG_NAMESPACE_TITLE = "AIXODIA_CONFIG";
 const DEVICE_NAME = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
-const DEVICE_HOST = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\.aixodia\.dpdns\.org$/;
 const ENGINE_HOST = /(^|\.)aixodia\.dpdns\.org$/;
 const DEVICE_TOOLS = new Set([
   "tap", "long_press", "swipe", "gesture", "multi_touch", "key_event",
@@ -9,8 +6,10 @@ const DEVICE_TOOLS = new Set([
   "screenshot", "act_and_observe",
 ]);
 
-let namespaceCache = { token: "", id: "", expiresAt: 0 };
 const deviceStatusCache = new Map();
+const DEVICE_REGISTRY_TTL_MS = 5 * 60_000;
+const DEVICE_STATUS_TTL_MS = 15_000;
+const deviceRegistryCache = new WeakMap();
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -32,45 +31,16 @@ function validEngineUrl(value) {
     return false;
   }
 }
-async function cloudflareJson(url, token) {
-  const response = await fetch(url, {
-    headers: { authorization: `Bearer ${token}`, accept: "application/json" },
-    signal: AbortSignal.timeout(6000),
-  });
-  const value = await response.json().catch(() => null);
-  if (!response.ok || !value?.success) throw new Error(value?.errors?.[0]?.message || `Cloudflare API ${response.status}`);
-  return value.result;
-}
-async function configNamespace(env) {
-  const token = env.CF_TOKEN;
-  if (!token) throw new Error("Engine access is not configured");
-  if (namespaceCache.token === token && namespaceCache.id && namespaceCache.expiresAt > Date.now()) return namespaceCache.id;
-  const result = await cloudflareJson(
-    `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces?per_page=1000`,
-    token,
-  );
-  const found = result.find(item => item.title === CONFIG_NAMESPACE_TITLE);
-  if (!found?.id) throw new Error("AIXODIA_CONFIG KV namespace was not found");
-  namespaceCache = { token, id: found.id, expiresAt: Date.now() + 10 * 60_000 };
-  return found.id;
-}
-async function engineBase(env) {
-  if (!env.CF_TOKEN) throw new Error("Engine access is not configured");
-  const namespace = await configNamespace(env);
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${namespace}/values/daemon%2Furl`,
-    { headers: { authorization: `Bearer ${env.CF_TOKEN}` }, signal: AbortSignal.timeout(5000) },
-  );
-  if (response.status === 404) return null;
-  if (!response.ok) throw new Error(`Unable to read daemon/url (HTTP ${response.status})`);
-  const value = (await response.text()).trim();
-  if (!validEngineUrl(value)) throw new Error("The stored engine URL is invalid");
+function engineBase(env) {
+  const value = typeof env.ENGINE_URL === "string" ? env.ENGINE_URL.trim() : "";
+  if (!value) throw new Error("Engine URL is not configured");
+  if (!validEngineUrl(value)) throw new Error("The configured engine URL is invalid");
   return value.replace(/\/$/, "");
 }
 
 export async function getEngineStatus(env) {
   try {
-    const base = await engineBase(env);
+    const base = engineBase(env);
     if (!base) return { configured: true, online: false, checkedAt: new Date().toISOString(), reason: "Engine URL is not registered", metrics: null };
     const response = await fetch(`${base}/healthz`, {
       headers: { accept: "application/json" },
@@ -96,7 +66,7 @@ export async function getEngineStatus(env) {
     };
   } catch (cause) {
     return {
-      configured: Boolean(env.CF_TOKEN),
+      configured: Boolean(env.ENGINE_URL && env.CF_TOKEN),
       online: false,
       checkedAt: new Date().toISOString(),
       reason: cause instanceof Error ? cause.message : "Engine is unreachable",
@@ -125,7 +95,7 @@ export async function proxyEngine(request, env, enginePath) {
     return error(404, "Engine route not available", "NOT_FOUND");
   }
   try {
-    const base = await engineBase(env);
+    const base = engineBase(env);
     if (!base) return error(503, "AIxodia Engine is not online", "ENGINE_OFFLINE");
     const upstreamHeaders = new Headers();
     upstreamHeaders.set("authorization", `Bearer ${env.CF_TOKEN}`);
@@ -175,7 +145,7 @@ async function probeDevice(env, name) {
       version: result?.serverInfo?.version ?? null,
       latencyMs: null,
     };
-    deviceStatusCache.set(name, { value, expiresAt: Date.now() + 8000 });
+    deviceStatusCache.set(name, { value, expiresAt: Date.now() + DEVICE_STATUS_TTL_MS });
     return value;
   } catch (cause) {
     const value = {
@@ -185,12 +155,14 @@ async function probeDevice(env, name) {
       version: null,
       latencyMs: null,
     };
-    deviceStatusCache.set(name, { value, expiresAt: Date.now() + 5000 });
+    deviceStatusCache.set(name, { value, expiresAt: Date.now() + DEVICE_STATUS_TTL_MS });
     return value;
   }
 }
 async function listDeviceNames(env) {
   if (!env.DEVICE_TUNNELS) throw new Error("DroidIME device registry is not configured");
+  const cached = deviceRegistryCache.get(env.DEVICE_TUNNELS);
+  if (cached && cached.expiresAt > Date.now()) return cached.names;
   const names = [];
   let cursor;
   do {
@@ -198,11 +170,14 @@ async function listDeviceNames(env) {
     for (const item of page.keys || []) if (validDevice(item.name)) names.push(item.name);
     cursor = page.list_complete ? undefined : page.cursor;
   } while (cursor);
-  return [...new Set(names)].sort();
+  const uniqueNames = [...new Set(names)].sort();
+  deviceRegistryCache.set(env.DEVICE_TUNNELS, { names: uniqueNames, expiresAt: Date.now() + DEVICE_REGISTRY_TTL_MS });
+  return uniqueNames;
 }
 export async function listDevices(env, { refresh = false } = {}) {
   try {
     const names = await listDeviceNames(env);
+    // Refresh means re-probe live device state; the registered-device list remains cached.
     if (refresh) for (const name of names) deviceStatusCache.delete(name);
     const items = [];
     for (let index = 0; index < names.length; index += 8) {
