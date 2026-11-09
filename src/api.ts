@@ -52,7 +52,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       headers: buildHeaders(init),
     })
   } catch {
-    throw new ApiError(0, { error: 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้', code: 'NETWORK_ERROR' })
+    throw new ApiError(0, { error: 'Unable to connect to the server.', code: 'NETWORK_ERROR' })
   }
 
   const text = await res.text()

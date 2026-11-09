@@ -63,9 +63,9 @@ export function relTime(iso?: string | null): string {
   if (!iso) return '—'
   const diff = Date.now() - new Date(iso).getTime()
   if (Number.isNaN(diff)) return '—'
-  if (diff < 5_000) return 'เมื่อกี้'
-  if (diff < 60_000) return `${Math.floor(diff / 1000)} วิที่แล้ว`
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} นาทีที่แล้ว`
+  if (diff < 5_000) return 'just now'
+  if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
   return fmtTime(iso)
 }
 
@@ -150,7 +150,7 @@ export function ErrorBanner({ message, onClose }: { message: string; onClose?: (
       <AlertTriangle size={16} />
       <span>{message}</span>
       {onClose && (
-        <button className="icon-btn" onClick={onClose} aria-label="ปิด">×</button>
+        <button className="icon-btn" onClick={onClose} aria-label="Close">×</button>
       )}
     </div>
   )
@@ -166,7 +166,7 @@ export function Skeleton({ rows = 3 }: { rows?: number }) {
   )
 }
 
-export function Boot({ label = 'กำลังเชื่อมต่อ console…' }: { label?: string }) {
+export function Boot({ label = 'Connecting to console…' }: { label?: string }) {
   return (
     <div className="boot">
       <div className="boot-mark"><Smartphone size={26} /></div>
@@ -182,7 +182,7 @@ export function StatusBadge({ status, checking }: { status: DeviceStatus | null;
   if (checking || !status) {
     return (
       <span className="status-badge status-badge--pending">
-        <Loader2 size={13} className="spin" /> กำลังตรวจสอบ
+        <Loader2 size={13} className="spin" /> Checking
       </span>
     )
   }
@@ -210,23 +210,23 @@ export function OfflineState({
   checking?: boolean
 }) {
   const reason =
-    status?.reason === 'timeout' ? 'อุปกรณ์ไม่ตอบสนองภายในเวลาที่กำหนด (timeout)'
-    : status?.reason === 'offline' ? 'ไม่พบ MCP server กำลังทำงานบนอุปกรณ์'
-    : status?.reason ? `เหตุผล: ${status.reason}`
-    : 'ยังไม่ได้ตรวจสอบสถานะ'
+    status?.reason === 'timeout' ? 'The device did not respond before the timeout.'
+    : status?.reason === 'offline' ? 'No MCP server is running on the device.'
+    : status?.reason ? `Reason: ${status.reason}`
+    : 'Status has not been checked yet.'
 
   return (
     <div className="offline-card">
       <div className="offline-icon"><WifiOff size={22} /></div>
       <div className="offline-copy">
-        <h3>อุปกรณ์ออฟไลน์</h3>
+        <h3>Device offline</h3>
         <p>{reason}</p>
         <p className="offline-meta">
-          ตรวจล่าสุด {fmtTime(status?.checkedAt)} · console และ API พร้อมใช้งานแล้ว รอให้เปิด MCP server บนเครื่อง
+          Last checked {fmtTime(status?.checkedAt)}. Start the MCP server on the device, then retry.
         </p>
       </div>
       <button className="btn btn--ghost" onClick={onRetry} disabled={checking}>
-        <RefreshCw size={14} className={checking ? 'spin' : ''} /> ลองใหม่
+        <RefreshCw size={14} className={checking ? 'spin' : ''} /> Retry
       </button>
     </div>
   )
@@ -266,7 +266,6 @@ export function LoginPage({
       <div className="ax-login-layout">
         <section className="ax-login-story" aria-labelledby="ax-login-headline">
           <div className="ax-orbit-scene" aria-hidden="true">
-            <div className="ax-orbit-grid" />
             <div className="ax-orbit-halo" />
             <div className="ax-orbit-ring ax-orbit-ring-one" />
             <div className="ax-orbit-ring ax-orbit-ring-two" />
@@ -284,7 +283,7 @@ export function LoginPage({
         </section>
 
         <section className="ax-login-panel" aria-labelledby="ax-login-title">
-          <h2 id="ax-login-title">เข้าสู่ระบบ</h2>
+          <h2 id="ax-login-title">Sign in</h2>
 
           {error && <div className="ax-login-error"><ErrorBanner message={error} /></div>}
 
@@ -295,7 +294,7 @@ export function LoginPage({
             disabled={busy || !health?.authConfigured}
           >
             {busy ? <Loader2 size={19} className="spin" /> : <Github size={19} />}
-            <span>{busy ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบด้วย GitHub'}</span>
+            <span>{busy ? 'Signing in…' : 'Continue with GitHub'}</span>
           </button>
         </section>
       </div>
@@ -377,17 +376,13 @@ export function Sidebar({
       </div>
 
       <div className="side-bottom">
-        <div className="side-meta">
-          <span><Activity size={12} /> {health?.protocolVersion || '2025-11-25'}</span>
-          <span>{health?.platform || 'cloudflare'}</span>
-        </div>
         <div className="side-user">
           <div className="avatar">{(username || '?').slice(0, 1).toUpperCase()}</div>
           <div className="side-user-copy">
             <strong>{username || 'guest'}</strong>
             <em>signed in</em>
           </div>
-          <button className="icon-btn" onClick={onLogout} title="ออกจากระบบ" aria-label="ออกจากระบบ">
+          <button className="icon-btn" onClick={onLogout} title="Sign out" aria-label="Sign out">
             <LogOut size={15} />
           </button>
         </div>
@@ -407,8 +402,8 @@ export function UserMenu({ username, onLogout }: { username: string | null; onLo
       </button>
       {open && (
         <div className="user-menu-pop">
-          <p>เซสชันของ {username}</p>
-          <button onClick={onLogout}><LogOut size={14} /> ออกจากระบบ</button>
+          <p>Signed in as {username}</p>
+          <button onClick={onLogout}><LogOut size={14} /> Sign out</button>
         </div>
       )}
     </div>
@@ -441,11 +436,11 @@ export function Topbar({
         <StatusBadge status={status} checking={checking} />
       </div>
       <div className="topbar-right">
-        <button className="btn btn--ghost" onClick={onRetry} disabled={checking} title="ตรวจสอบสถานะใหม่">
+        <button className="btn btn--ghost" onClick={onRetry} disabled={checking} title="Check device status">
           <RefreshCw size={14} className={checking ? 'spin' : ''} />
         </button>
         <button className="btn btn--primary" onClick={onRefresh} disabled={busy || !status?.online}>
-          <Camera size={15} /> ถ่ายภาพหน้าจอ
+          <Camera size={15} /> Capture screen
         </button>
         <UserMenu username={username} onLogout={onLogout} />
       </div>
@@ -456,8 +451,7 @@ export function Topbar({
 export function Footer({ health }: { health: Health | null }) {
   return (
     <footer className="footer">
-      <span><ShieldCheck size={13} /> ทุกคำสั่งผ่าน signed session · ไม่มี token อยู่ในเบราว์เซอร์</span>
-      <span>{health?.protocolVersion || 'MCP 2025-11-25'} · {health?.platform || 'cloudflare'}</span>
+      <span><ShieldCheck size={13} /> Commands use a signed session. No tokens are stored in the browser.</span>
     </footer>
   )
 }
@@ -532,7 +526,7 @@ export function ToolForm({
     setValues(next)
   }, [tool])
 
-  if (!tool) return <Empty title="ไม่พบคำสั่ง" hint="ตรวจสอบ /api/tools" />
+  if (!tool) return <Empty title="No commands available" hint="Check the tools API response." />
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -580,14 +574,14 @@ export function ToolForm({
           </div>
         ))}
         {tool.fields.length === 0 && (
-          <p className="tool-noargs">คำสั่งนี้ไม่ต้องระบุพารามิเตอร์</p>
+          <p className="tool-noargs">This command has no parameters.</p>
         )}
       </div>
 
       <button className="btn btn--primary btn--block" type="submit" disabled={busy || disabled}>
-        {busy ? <><Loader2 size={16} className="spin" /> กำลังส่งคำสั่ง…</> : <><Play size={15} /> ส่งคำสั่ง {tool.name}</>}
+        {busy ? <><Loader2 size={16} className="spin" /> Sending command…</> : <><Play size={15} /> Run {tool.name}</>}
       </button>
-      {disabled && <p className="tool-disabled-note">ปิดการส่งคำสั่งขณะอุปกรณ์ออฟไลน์</p>}
+      {disabled && <p className="tool-disabled-note">Commands are unavailable while the device is offline.</p>}
     </form>
   )
 }
@@ -668,17 +662,17 @@ export function ScreenView({
           className="screen-stage"
           onMouseMove={handleMove}
           onClick={handleClick}
-          title={src && !disabled ? 'คลิกเพื่อส่งคำสั่ง tap ตามตำแหน่ง' : undefined}
+          title={src && !disabled ? 'Click the screen to send a tap at this position' : undefined}
         >
         {src ? (
-          <img className="screen-img" src={src} alt="หน้าจออุปกรณ์" draggable={false} />
+          <img className="screen-img" src={src} alt="Device screen" draggable={false} />
         ) : (
           <div className="screen-placeholder">
             <ScanLine size={38} />
-            <p>ยังไม่มีภาพหน้าจอ</p>
-            <span>กด «ถ่ายภาพหน้าจอ» เพื่อดึงภาพจากอุปกรณ์</span>
+            <p>No screenshot yet</p>
+            <span>Capture the current device screen to view it here.</span>
             <button className="btn btn--ghost" onClick={(e) => { e.stopPropagation(); onCapture() }} disabled={busy || disabled}>
-              <Camera size={14} /> ถ่ายภาพเดี๋ยวนี้
+              <Camera size={14} /> Capture now
             </button>
           </div>
         )}
@@ -698,13 +692,13 @@ export function ScreenView({
         {busy && (
           <div className="screen-overlay">
             <Loader2 size={26} className="spin" />
-            <span>กำลังรอภาพจากอุปกรณ์…</span>
+            <span>Waiting for device screenshot…</span>
           </div>
         )}
       </div>
       <p className="screen-caption">
         <MousePointer2 size={13} />
-        {src ? 'คลิกบนภาพเพื่อแตะ (tap) ตามเปอร์เซ็นต์ของหน้าจอ' : 'ภาพจะแสดงที่นี่หลังส่งคำสั่งสำเร็จ'}
+        {src ? 'Click the image to tap the corresponding screen position.' : 'The screenshot will appear here after a successful capture.'}
       </p>
     </div>
   )
@@ -734,13 +728,13 @@ export function CommandLog({
   return (
     <div className="log-wrap">
       <div className="log-head">
-        <span><Clock size={13} /> {entries.length} รายการ · เก็บในเบราว์เซอร์</span>
-        <button className="icon-btn" onClick={onClear} disabled={!entries.length} title="ล้างประวัติ" aria-label="ล้างประวัติ">
+        <span><Clock size={13} /> {entries.length} entries · Stored in this browser</span>
+        <button className="icon-btn" onClick={onClear} disabled={!entries.length} title="Clear history" aria-label="Clear history">
           <Trash2 size={14} />
         </button>
       </div>
       {entries.length === 0 ? (
-        <Empty icon={<Terminal size={20} />} title="ยังไม่มีคำสั่ง" hint="ประวัติจะแสดงที่นี่และคงอยู่หลังรีเฟรช" />
+        <Empty icon={<Terminal size={20} />} title="No commands yet" hint="Command history will appear here and persist after refresh." />
       ) : (
         <ul className="log-list">
           {entries.map((e) => (
@@ -753,7 +747,7 @@ export function CommandLog({
                   <strong>{e.tool}</strong>
                   <span className="log-time">{fmtTime(e.at)}</span>
                   {e.durationMs !== null && <span className="log-dur">{e.durationMs}ms</span>}
-                  {e.hasScreenshot && <Chip tone="info">ภาพจอ</Chip>}
+                  {e.hasScreenshot && <Chip tone="info">Screenshot</Chip>}
                 </div>
                 <p className="log-args">{argsSummary(e.arguments) || (e.error ? e.error.message : '—')}</p>
                 {e.error && <p className="log-err">{e.error.code}: {e.error.message}</p>}
@@ -762,8 +756,8 @@ export function CommandLog({
                 className="icon-btn"
                 onClick={() => onReplay(e)}
                 disabled={disabled || !e.arguments}
-                title="ส่งคำสั่งซ้ำ"
-                aria-label="ส่งคำสั่งซ้ำ"
+                title="Run again"
+                aria-label="Run again"
               >
                 <Play size={13} />
               </button>
@@ -774,5 +768,4 @@ export function CommandLog({
     </div>
   )
 }
-
 

@@ -18,8 +18,8 @@ Provide an authenticated web entry point to the AIxodia Device Console for contr
 
 - GitHub OAuth is the only sign-in provider currently implemented.
 - The backend owns OAuth and session handling; preserve the existing `/sso/github` flow and Cloudflare session behavior.
-- The server health endpoint supplies OAuth readiness, platform, MCP protocol version, and connection status.
-- Keep the device-control security warning visible before authentication.
+- The server health endpoint supplies OAuth readiness; internal platform and protocol metadata are not user-facing content.
+- Keep the sign-in surface minimal; show only actionable authentication errors.
 - The page must work on desktop, tablet, and mobile web.
 - Disable browser zoom and page scrolling as explicitly requested for this surface.
 - The GitHub sign-in button must not flash blue on press or focus; retain a visible, brand-colored keyboard focus indicator.
@@ -29,7 +29,7 @@ Provide an authenticated web entry point to the AIxodia Device Console for contr
 - Product name: AIxodia.
 - Primary visual reference: Canva design “AIXODIA Responsive Login Website” (DAHaZr3HwVg), with its desktop two-column brand-story and sign-in composition and compact tablet/mobile adaptations.
 - Use the existing AIxodia purple/indigo identity, with the orbital-network visual from the reference.
-- Preserve Thai-language product and security copy where it already exists.
+- All user-facing interface copy must be English-only.
 
 ## Evidence on Hand
 
@@ -40,7 +40,7 @@ Provide an authenticated web entry point to the AIxodia Device Console for contr
 ## Product Principles
 
 - Make secure sign-in the single obvious next action.
-- Explain the product before asking for authentication.
-- Preserve security and connection status without distracting from sign-in.
+- Keep sign-in copy concise and in English.
+- Avoid implementation metadata, protocol dates, platform labels, welcome copy, and decorative status messages in the interface.
 - Keep the experience legible and direct on touch and pointer devices.
 
