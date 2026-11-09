@@ -3,20 +3,21 @@
    (hero / stat-grid / run-strip / release / lang-bar / commits) blocks removed. */
 
 :root {
-  --bg: #080a12;
-  --surface: #0f1320;
-  --surface-2: #141a2a;
-  --surface-3: #1a2134;
-  --border: rgba(255, 255, 255, 0.075);
-  --border-strong: rgba(255, 255, 255, 0.14);
-  --text: #e9edf8;
-  --muted: #8b93a9;
-  --dim: #5e667c;
-  --accent: #8b7cff;
-  --success: #34d399;
-  --danger: #fb7185;
-  --warn: #fbbf24;
-  --info: #38bdf8;
+  /* AIxodia midnight palette */
+  --bg: #000000;
+  --surface: #040226;
+  --surface-2: #08083a;
+  --surface-3: #11114d;
+  --border: rgba(145, 142, 255, 0.13);
+  --border-strong: rgba(145, 142, 255, 0.24);
+  --text: #f4f3ff;
+  --muted: #aaa8d0;
+  --dim: #77749f;
+  --accent: #7772ff;
+  --success: #45d6b0;
+  --danger: #ff6b8a;
+  --warn: #f6c66b;
+  --info: #69c8ff;
   --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   --sans: 'Inter', 'Noto Sans Thai', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --radius: 14px;
@@ -54,14 +55,14 @@ a { color: var(--info); }
   align-items: center;
   justify-content: center;
   gap: 18px;
-  background: radial-gradient(700px 400px at 50% 40%, rgba(139, 124, 255, 0.11), transparent 70%), var(--bg);
+  background: radial-gradient(700px 400px at 50% 40%, rgba(119, 114, 255, 0.11), transparent 70%), var(--bg);
 }
 .boot-mark {
   width: 62px; height: 62px; border-radius: 18px;
   display: grid; place-items: center;
   color: #fff;
-  background: linear-gradient(145deg, var(--accent), #5b4bd6);
-  box-shadow: 0 12px 36px rgba(139, 124, 255, 0.32);
+  background: linear-gradient(145deg, var(--accent), #3430a8);
+  box-shadow: 0 12px 36px rgba(119, 114, 255, 0.32);
 }
 .boot-spinner {
   width: 26px; height: 26px; border-radius: 50%;
@@ -80,7 +81,7 @@ a { color: var(--info); }
   padding: 24px;
   position: relative;
   overflow: hidden;
-  background: radial-gradient(900px 520px at 50% 30%, rgba(139, 124, 255, 0.13), transparent 70%), var(--bg);
+  background: radial-gradient(900px 520px at 50% 30%, rgba(119, 114, 255, 0.13), transparent 70%), var(--bg);
 }
 .login-glow {
   position: absolute; inset: 0;
@@ -103,7 +104,7 @@ a { color: var(--info); }
 .login-mark {
   width: 48px; height: 48px; border-radius: 14px; flex: none;
   display: grid; place-items: center; color: #fff;
-  background: linear-gradient(145deg, var(--accent), #5b4bd6);
+  background: linear-gradient(145deg, var(--accent), #3430a8);
 }
 .login-brand h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
 .login-brand p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
@@ -132,12 +133,12 @@ a { color: var(--info); }
 .input-eye:hover { color: var(--text); background: var(--surface-3); }
 .input {
   width: 100%; padding: 10px 12px;
-  background: rgba(6, 8, 15, 0.65);
+  background: rgba(0, 0, 0, 0.72);
   border: 1px solid var(--border-strong);
   border-radius: 9px; color: var(--text); font-size: 13px;
   outline: none; transition: border-color 0.15s, box-shadow 0.15s;
 }
-.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139, 124, 255, 0.14); }
+.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(119, 114, 255, 0.14); }
 .input::placeholder { color: var(--dim); }
 .textarea { resize: vertical; font-family: var(--mono); font-size: 12px; line-height: 1.5; }
 .login-form .btn--block { margin-top: 16px; }
@@ -156,7 +157,7 @@ a { color: var(--info); }
   position: sticky; top: 0; height: 100vh;
   display: flex; flex-direction: column;
   padding: 22px 16px 16px;
-  background: linear-gradient(180deg, #0d1120, #0a0d17);
+  background: linear-gradient(180deg, #07052e, #020116);
   border-right: 1px solid var(--border);
   overflow-y: auto;
 }
@@ -164,8 +165,8 @@ a { color: var(--info); }
 .brand-mark {
   width: 38px; height: 38px; border-radius: 11px; flex: none;
   display: grid; place-items: center; color: #fff;
-  background: linear-gradient(145deg, var(--accent), #5b4bd6);
-  box-shadow: 0 6px 20px rgba(139, 124, 255, 0.26);
+  background: linear-gradient(145deg, var(--accent), #3430a8);
+  box-shadow: 0 6px 20px rgba(119, 114, 255, 0.26);
 }
 .brand-copy { min-width: 0; display: flex; flex-direction: column; }
 .brand-copy strong { font-size: 13.5px; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -218,7 +219,7 @@ a { color: var(--info); }
 .avatar {
   width: 30px; height: 30px; border-radius: 9px; flex: none;
   display: grid; place-items: center; font-size: 12px; font-weight: 700;
-  color: #fff; background: linear-gradient(145deg, var(--accent), #5b4bd6);
+  color: #fff; background: linear-gradient(145deg, var(--accent), #3430a8);
 }
 .avatar--sm { width: 24px; height: 24px; border-radius: 7px; font-size: 10px; }
 .side-user-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -230,7 +231,7 @@ a { color: var(--info); }
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
   padding: 14px 26px; min-height: 64px;
   border-bottom: 1px solid var(--border);
-  background: rgba(10, 13, 22, 0.85); backdrop-filter: blur(10px);
+  background: rgba(4, 2, 38, 0.88); backdrop-filter: blur(10px);
   position: sticky; top: 0; z-index: 20;
 }
 .topbar-left, .topbar-right { display: flex; align-items: center; gap: 10px; }
@@ -284,7 +285,7 @@ a { color: var(--info); }
   transition: 0.15s; white-space: nowrap;
 }
 .btn:hover:not(:disabled) { border-color: var(--accent); }
-.btn--primary { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 6px 18px rgba(139, 124, 255, 0.22); }
+.btn--primary { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 6px 18px rgba(119, 114, 255, 0.22); }
 .btn--primary:hover:not(:disabled) { filter: brightness(1.1); }
 .btn--ghost { background: transparent; color: var(--muted); }
 .btn--ghost:hover:not(:disabled) { color: var(--text); }
@@ -341,7 +342,7 @@ a { color: var(--info); }
 .screen-frame {
   position: relative; display: flex; align-items: center; justify-content: center;
   min-height: 320px; padding: 14px; border-radius: 12px;
-  background: radial-gradient(circle at 50% 40%, #10162a, #05070d 75%);
+  background: radial-gradient(circle at 50% 40%, #11104a, #000000 75%);
   border: 1px solid var(--border); overflow: hidden;
 }
 .screen-frame.is-disabled { opacity: 0.82; }
@@ -362,20 +363,20 @@ a { color: var(--info); }
 .screen-placeholder p { margin: 0; font-size: 14px; font-weight: 600; color: var(--muted); }
 .screen-placeholder span { font-size: 11.5px; max-width: 260px; }
 .screen-placeholder .btn { margin-top: 8px; }
-.screen-crosshair { position: absolute; background: rgba(139, 124, 255, 0.6); pointer-events: none; }
+.screen-crosshair { position: absolute; background: rgba(119, 114, 255, 0.6); pointer-events: none; }
 .screen-crosshair--x { top: 0; bottom: 0; width: 1px; }
 .screen-crosshair--y { left: 0; right: 0; height: 1px; }
 .screen-readout {
   position: absolute; transform: translate(10px, 10px);
   padding: 3px 7px; border-radius: 6px; white-space: nowrap;
   font: 10.5px/1.4 var(--mono); color: var(--text);
-  background: rgba(8, 10, 18, 0.92); border: 1px solid var(--border-strong);
+  background: rgba(4, 2, 38, 0.96); border: 1px solid var(--border-strong);
   pointer-events: none;
 }
 .screen-overlay {
   position: absolute; inset: 0; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 10px;
-  background: rgba(6, 8, 15, 0.72); backdrop-filter: blur(3px);
+  background: rgba(0, 0, 0, 0.78); backdrop-filter: blur(3px);
   color: var(--text); font-size: 12px; z-index: 5;
 }
 .screen-overlay svg { color: var(--accent); }
@@ -559,7 +560,7 @@ a { color: var(--info); }
   justify-content: space-between;
   gap: 16px;
   padding: 0 26px;
-  background: rgba(10, 13, 22, 0.88);
+  background: rgba(4, 2, 38, 0.92);
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(12px);
 }
@@ -579,8 +580,8 @@ a { color: var(--info); }
   color: #fff;
   font-size: 17px;
   font-weight: 800;
-  background: linear-gradient(145deg, var(--accent), #5b4bd6);
-  box-shadow: 0 6px 20px rgba(139, 124, 255, 0.24);
+  background: linear-gradient(145deg, var(--accent), #3430a8);
+  box-shadow: 0 6px 20px rgba(119, 114, 255, 0.24);
 }
 .hello-world-brand-name {
   font-size: 14px;
