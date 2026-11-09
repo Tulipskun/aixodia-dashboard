@@ -13,6 +13,8 @@ export default function App() {
   const [loginBusy, setLoginBusy] = useState(false)
   const [loginError, setLoginError] = useState<string | null>(null)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false)
+  const [logoutBusy, setLogoutBusy] = useState(false)
   const accountMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -78,12 +80,16 @@ export default function App() {
   }
 
   const handleLogout = async () => {
+    if (logoutBusy) return
+    setLogoutBusy(true)
     try {
       await api.logout()
     } catch {
       // The server-side session may already have expired.
     }
     setSession(null)
+    setLogoutConfirmOpen(false)
+    setLogoutBusy(false)
     setPhase('login')
   }
 
@@ -126,7 +132,7 @@ export default function App() {
                 className="hello-world-logout"
                 type="button"
                 role="menuitem"
-                onClick={() => { setAccountMenuOpen(false); void handleLogout() }}
+                onClick={() => { setAccountMenuOpen(false); setLogoutConfirmOpen(true) }}
               >
                 Sign out
               </button>
@@ -137,6 +143,44 @@ export default function App() {
       <main className="hello-world-screen" aria-label="Dashboard">
         <span>hello world</span>
       </main>
+      {logoutConfirmOpen && (
+        <div
+          className="logout-confirm-backdrop"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget && !logoutBusy) setLogoutConfirmOpen(false)
+          }}
+        >
+          <section
+            className="logout-confirm-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="logout-confirm-title"
+            aria-describedby="logout-confirm-description"
+          >
+            <div className="logout-confirm-icon" aria-hidden="true">↪</div>
+            <h2 id="logout-confirm-title">Sign out?</h2>
+            <p id="logout-confirm-description">Are you sure you want to sign out of your AIxodia account?</p>
+            <div className="logout-confirm-actions">
+              <button
+                className="logout-confirm-cancel"
+                type="button"
+                disabled={logoutBusy}
+                onClick={() => setLogoutConfirmOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="logout-confirm-submit"
+                type="button"
+                disabled={logoutBusy}
+                onClick={() => void handleLogout()}
+              >
+                {logoutBusy ? 'Signing out…' : 'Sign out'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }
