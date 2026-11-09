@@ -2,7 +2,7 @@
 
 ## Direction
 
-Follow the user-selected Canva reference “AIXODIA Responsive Login Website”: a precise, midnight-indigo interface with a centered AIxodia identity, a desktop two-column composition, and a compact single-column adaptation on tablet and mobile. The login page is an Operate/entry surface: clarity and task completion take priority over decorative complexity.
+Follow the user-selected Canva reference “AIXODIA Responsive Login Website”: a precise, midnight-indigo interface with a centered AIxodia identity, a minimal desktop two-column composition with an orbital illustration, and a compact single-column adaptation on tablet and mobile. The login page is an Operate/entry surface: clarity and task completion take priority over decorative complexity.
 
 ## Color
 
@@ -16,14 +16,13 @@ Follow the user-selected Canva reference “AIXODIA Responsive Login Website”:
 ## Typography
 
 - Display and Latin UI: Saira
-- Thai UI: Noto Sans Thai
-- Body copy: 14–16px with generous line height
-- Keep headings short and high contrast; avoid gradient text.
+- Body copy: 14–16px with generous line height; English-only interface
+- Keep all interface copy in English. Keep headings short and high contrast; avoid gradient text.
 
 ## Composition
 
-- Desktop: brand narrative and orbital network visualization on the left; a focused GitHub sign-in panel on the right.
-- Tablet/mobile: compact brand mark and sign-in panel in a single centered column; omit only the large desktop orbital field, not the product or security information.
+- Desktop: a restrained orbital network illustration on the left; a focused GitHub sign-in panel on the right.
+- Tablet/mobile: compact brand mark and sign-in panel in a single centered column; reduce the orbital illustration to preserve room for the sign-in action.
 - Keep the primary action prominent and full-width.
 
 ## Interaction

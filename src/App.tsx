@@ -30,11 +30,11 @@ export default function App() {
     const authError = params.get('auth_error')
     if (authError) {
       const messages: Record<string, string> = {
-        access_denied: 'คุณยกเลิกการอนุญาตจาก GitHub',
-        not_allowed: 'บัญชี GitHub นี้ไม่ได้รับอนุญาตให้เข้าใช้งาน',
-        oauth_failed: 'GitHub authentication ไม่สำเร็จ กรุณาลองใหม่',
+        access_denied: 'You cancelled GitHub authorization.',
+        not_allowed: 'This GitHub account is not authorized to access the console.',
+        oauth_failed: 'GitHub sign-in failed. Please try again.',
       }
-      setLoginError(messages[authError] || 'ไม่สามารถเข้าสู่ระบบด้วย GitHub ได้')
+      setLoginError(messages[authError] || 'Unable to sign in with GitHub.')
       window.history.replaceState({}, '', window.location.pathname)
     }
 
@@ -114,7 +114,7 @@ export default function App() {
     setPhase('login')
   }
 
-  if (phase === 'boot') return <Boot label="กำลังตรวจสอบเซสชัน…" />
+  if (phase === 'boot') return <Boot label="Checking your session…" />
 
   if (phase === 'login') {
     return (
@@ -205,4 +205,3 @@ export default function App() {
     </div>
   )
 }
-
