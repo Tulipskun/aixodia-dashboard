@@ -647,9 +647,15 @@ body {
   contain: layout paint;
 }
 
-/* Button touch behavior without forced pressed-state colors. */
+/* Remove the browser's pressed/tap highlight from every element. */
+*,
+*::before,
+*::after {
+  -webkit-tap-highlight-color: transparent !important;
+}
+
+/* Keep touch gestures predictable on interactive controls. */
 button,
 [role="button"] {
-  -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
