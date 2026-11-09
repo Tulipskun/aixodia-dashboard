@@ -73,6 +73,15 @@ export default function App() {
     }
   }, [accountMenuOpen])
 
+  useEffect(() => {
+    if (!logoutConfirmOpen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !logoutBusy) setLogoutConfirmOpen(false)
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [logoutConfirmOpen, logoutBusy])
+
   const handleGithubLogin = () => {
     setLoginBusy(true)
     setLoginError(null)
@@ -164,6 +173,7 @@ export default function App() {
               <button
                 className="logout-confirm-cancel"
                 type="button"
+                autoFocus
                 disabled={logoutBusy}
                 onClick={() => setLogoutConfirmOpen(false)}
               >
