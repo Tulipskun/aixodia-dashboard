@@ -222,7 +222,7 @@ export async function getDeviceTools(env, name) {
     const result = await mcpRequest(env, name, {
       jsonrpc: "2.0", id: 2, method: "tools/list", params: {},
     }, { protocol: true });
-    return json({ tools: Array.isArray(result?.tools) ? result.tools : [], protocolVersion: "2025-11-25" });
+    return json({ tools: Array.isArray(result?.tools) ? result.tools : [] });
   } catch (cause) {
     return error(502, cause instanceof Error ? cause.message : "Unable to read device tools", "DEVICE_UNAVAILABLE");
   }

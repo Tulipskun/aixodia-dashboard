@@ -74,10 +74,15 @@ test('GitHub OAuth creates a D1 session, restores it from cookie, renews it, and
     const sessionPair = sessionCookie.split(';')[0];
     assert.equal(db.rows.size, 1);
 
+    const healthResponse = await worker.fetch(new Request('https://dashboard.example.test/api/health'), env);
+    const health = await healthResponse.json();
+    assert.deepEqual(health, { ok: true, authConfigured: true });
+
     const sessionResponse = await worker.fetch(new Request('https://dashboard.example.test/api/session', { headers: { cookie: sessionPair } }), env);
     const session = await sessionResponse.json();
     assert.equal(session.authenticated, true);
     assert.equal(session.username, 'Tulipskun');
+    assert.equal('platform' in session, false);
 
     const [hash, row] = [...db.rows.entries()][0];
     row.expires_at = Math.floor(Date.now() / 1000) + 86400;

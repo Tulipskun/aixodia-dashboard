@@ -83,9 +83,7 @@ export function DashboardHome({ onOpenChat, onOpenDevice }: {
           <div className="service-card-identity">
             <div className="service-icon engine-icon"><Bot size={22} /></div>
             <div className="service-heading">
-              <p className="eyebrow">AI RUNTIME</p>
               <h1 id="engine-card-title">AIxodia Engine</h1>
-              <p className="service-description">Your AI workspace, running on your connected engine.</p>
             </div>
           </div>
           <span className={`connection-state ${engine?.online ? 'is-online' : 'is-offline'}`}>
@@ -98,12 +96,9 @@ export function DashboardHome({ onOpenChat, onOpenDevice }: {
           <div className="metric-stat">
             <div className="metric-label"><Wifi size={16} /> Uptime</div>
             <strong>{engine?.online ? formatUptime(engine.uptimeSeconds) : '—'}</strong>
-            <span className="metric-foot">{engine?.version || 'Engine version unavailable'}</span>
           </div>
         </div>
-        {engine && !engine.online && <p className="service-warning">{engine.reason || 'Engine is not reachable.'}</p>}
         <div className="service-card-foot">
-          <span className="updated-at">{engine?.online ? 'Live engine metrics' : 'Waiting for engine connection'}</span>
           <button className="action-button primary" type="button" onClick={onOpenChat} disabled={!engine?.online}>
             Open AIxodia <ChevronRight size={17} />
           </button>
@@ -115,9 +110,7 @@ export function DashboardHome({ onOpenChat, onOpenDevice }: {
           <div className="service-card-identity">
             <div className="service-icon devices-icon"><MonitorSmartphone size={21} /></div>
             <div className="service-heading">
-              <p className="eyebrow">REMOTE DEVICES</p>
               <h2 id="devices-card-title">DroidIME Devices</h2>
-              <p className="service-description">Android devices registered with the DroidIME gateway.</p>
             </div>
           </div>
           <button className="icon-action" type="button" aria-label="Refresh device list" onClick={() => void refreshDevices(true)}>
@@ -138,7 +131,6 @@ export function DashboardHome({ onOpenChat, onOpenDevice }: {
                 <strong>{device.name}</strong>
                 <span className={device.status.online ? 'online-text' : 'offline-text'}>
                   <span className="state-dot" />{device.status.online ? 'Online' : 'Offline'}
-                  {!device.status.online && device.status.reason ? <small> · {device.status.reason}</small> : null}
                 </span>
               </div>
               <button className="action-button secondary" type="button" disabled={!device.status.online} onClick={() => onOpenDevice(device)}>
@@ -354,8 +346,7 @@ export function EngineChat({ onBack }: { onBack: () => void }) {
           <button className="back-button chat-back-desktop" type="button" onClick={onBack}>Dashboard</button>
         </header>
         <div className="chat-messages" ref={scrollRef}>
-          {loading ? <div className="chat-empty"><LoaderCircle className="spin" size={22} /> Loading conversation…</div> :
-            messages.length === 0 ? <div className="chat-empty"><Bot size={31} /><strong>What can I help you with?</strong><span>Messages are processed by your connected AIxodia Engine.</span></div> :
+          {loading ? <div className="chat-empty"><LoaderCircle className="spin" size={22} /> Loading…</div> :
             messages.map(message => (
               <article key={message.id} className={`chat-message ${message.role === 'user' ? 'is-user' : 'is-assistant'} ${message.error ? 'has-error' : ''}`}>
                 {message.role === 'assistant' && <div className="message-avatar"><Bot size={16} /></div>}
@@ -386,7 +377,6 @@ export function EngineChat({ onBack }: { onBack: () => void }) {
             <button className="send-button" type="submit" aria-label="Send message" disabled={!draft.trim() || loading || !selected}><Send size={16} /></button>
           )}
         </form>
-        <p className="chat-disclaimer">AIxodia Engine may make mistakes. Verify important results.</p>
       </div>
     </section>
   )
