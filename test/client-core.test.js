@@ -9,6 +9,7 @@ import {
   sessionFromStored,
   DEVICE_PATHS,
   engineCall,
+  refreshEngineSession,
   normalizeDevice,
   normalizeDevices,
   normalizeDeviceTools,
@@ -102,6 +103,26 @@ test('sessionFromStored derives authenticated/user/expiresAt from token state', 
   })
 })
 
+test('sessionFromStored stays authenticated after access expiry while refresh credential is valid', () => {
+  const now = 1_700_000_000_000
+  const stored = {
+    token: 'expired-access',
+    expiresAt: 1_699_999_999,
+    refreshToken: 'long-lived-refresh',
+    refreshExpiresAt: 1_800_000_000,
+    user: 'Tulipskun',
+    scope: 'client',
+  }
+  assert.deepEqual(sessionFromStored(stored, now), {
+    authenticated: true,
+    username: 'Tulipskun',
+    expiresAt: new Date(1_800_000_000 * 1000).toISOString(),
+  })
+  assert.deepEqual(sessionFromStored({ ...stored, refreshExpiresAt: 1_700_000_000 }, now), {
+    authenticated: false, username: null, expiresAt: null,
+  })
+})
+
 // ---------------------------------------------------------------- device paths
 
 test('DEVICE_PATHS point at the real engine endpoints and encode ids', () => {
@@ -151,6 +172,69 @@ test('engineCall returns NETWORK_ERROR on a transport failure', async () => {
   assert.match(result.error, /Unable to connect to the engine/)
 })
 
+
+test('refreshEngineSession posts refresh_token to the public refresh endpoint and validates response', async () => {
+  const fetchFn = createFetch([jsonResponse({
+    token: 'new-access',
+    expires_at: 1_800_000_000,
+    refresh_token: 'long-refresh',
+    refresh_expires_at: 1_900_000_000,
+    user: 'Tulipskun',
+    scope: 'client',
+  })])
+  const result = await refreshEngineSession(fetchFn, 'https://engine.test', 'old-refresh', 1_700_000_000_000)
+  assert.equal(result.ok, true)
+  assert.deepEqual(result.session, {
+    token: 'new-access',
+    expiresAt: 1_800_000_000,
+    refreshToken: 'long-refresh',
+    refreshExpiresAt: 1_900_000_000,
+    user: 'Tulipskun',
+    scope: 'client',
+  })
+  assert.equal(fetchFn.calls[0].url, 'https://engine.test/v1/auth/refresh')
+  assert.equal(fetchFn.calls[0].init.method, 'POST')
+  assert.equal(fetchFn.calls[0].init.credentials, 'omit')
+  assert.deepEqual(JSON.parse(fetchFn.calls[0].init.body), { refresh_token: 'old-refresh' })
+})
+
+test('refreshEngineSession preserves network errors so the stored refresh credential can be retried', async () => {
+  const result = await refreshEngineSession(createFetch([new Error('offline')]), 'https://engine.test', 'old-refresh')
+  assert.equal(result.ok, false)
+  assert.equal(result.status, 0)
+  assert.equal(result.code, 'NETWORK_ERROR')
+})
+
+test('refreshEngineSession distinguishes rejected credentials and transient server failures', async () => {
+  const rejected = await refreshEngineSession(
+    createFetch([jsonResponse({ error: 'refresh token rejected', code: 'REFRESH_TOKEN_REJECTED' }, { ok: false, status: 401 })]),
+    'https://engine.test', 'bad-refresh',
+  )
+  assert.equal(rejected.ok, false)
+  assert.equal(rejected.status, 401)
+  assert.equal(rejected.code, 'REFRESH_TOKEN_REJECTED')
+  const unavailable = await refreshEngineSession(
+    createFetch([jsonResponse({ error: 'warming up' }, { ok: false, status: 503 })]),
+    'https://engine.test', 'valid-refresh',
+  )
+  assert.equal(unavailable.ok, false)
+  assert.equal(unavailable.status, 503)
+})
+
+test('refreshEngineSession rejects incomplete and already-expired credentials', async () => {
+  const incomplete = await refreshEngineSession(
+    createFetch([jsonResponse({ token: 'access', expires_at: 1_800_000_000 })]),
+    'https://engine.test', 'refresh', 1_700_000_000_000,
+  )
+  assert.equal(incomplete.ok, false)
+  assert.equal(incomplete.code, 'INVALID_TOKEN_RESPONSE')
+  const expired = await refreshEngineSession(
+    createFetch([jsonResponse({ token: 'access', expires_at: 1_699_999_999, refresh_token: 'refresh', refresh_expires_at: 1_900_000_000 })]),
+    'https://engine.test', 'refresh', 1_700_000_000_000,
+  )
+  assert.equal(expired.ok, false)
+  assert.equal(expired.code, 'INVALID_TOKEN_RESPONSE')
+})
 test('engineCall surfaces the engine error code and message on a non-2xx', async () => {
   const fetchFn = createFetch([jsonResponse({ error: 'Tool is not allowed', code: 'INVALID_TOOL' }, { ok: false, status: 400 })])
   const result = await engineCall(fetchFn, 'https://engine.test', DEVICE_PATHS.action('dev-1'), { method: 'POST', body: {} })

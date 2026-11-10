@@ -25,8 +25,8 @@ export default function App() {
   const deviceFlowAbort = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    // A 401 from any engine route means the short-lived token is invalid or
-    // expired: clear it locally and return to the PAT login form.
+    // A 401 means the Engine rejected the access/refresh credentials. Transient
+    // refresh failures never call this handler and keep the user signed in.
     api.setUnauthorizedHandler(() => {
       api.logout()
       setSession(null)
@@ -36,9 +36,9 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    // Session is derived from the short-lived token in sessionStorage (local,
-    // no network call). Every engine route except /v1/auth/token needs that
-    // token, so we must NOT call /healthz before we are authenticated.
+    // Session is derived locally from the access/refresh credentials in
+    // sessionStorage. Every engine route except auth issuance/refresh requires
+    // an access token, so do not call /healthz before sign-in.
     const current = api.getSession()
     setSession(current)
     setPhase(current.authenticated ? 'home' : 'login')

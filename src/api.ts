@@ -20,6 +20,7 @@ import {
   normalizeDevices,
   normalizeDeviceTools,
   pollDeviceFlow,
+  refreshEngineSession,
   requestDeviceCode,
   resolveEngineUrl,
   sessionFromStored,
@@ -40,8 +41,8 @@ const ENGINE_URL = resolveEngineUrl(import.meta.env.VITE_ENGINE_URL)
 const GITHUB_CLIENT_ID: string =
   (import.meta.env.VITE_GITHUB_CLIENT_ID as string | undefined)?.trim() ?? ''
 
-// The engine-issued short-lived token lives in sessionStorage (per-tab, cleared
-// on tab close) — NEVER localStorage, and NEVER the user's GitHub PAT.
+// Engine-issued access + refresh credentials live in sessionStorage (per-tab,
+// cleared on tab close) — NEVER localStorage, and NEVER the user's GitHub PAT.
 const TOKEN_KEY = 'aixodia.client-session.v1'
 
 // Path constants are derived through enginePath() so the legacy /api/* mapping
@@ -57,6 +58,8 @@ const P = {
 interface TokenResponse {
   token: string
   expires_at: number
+  refresh_token: string
+  refresh_expires_at: number
   user: string
   scope: string
 }
@@ -99,6 +102,8 @@ function readStored(): StoredSession | null {
     if (!raw) return null
     const parsed = JSON.parse(raw) as StoredSession
     if (!parsed || typeof parsed.token !== 'string' || typeof parsed.expiresAt !== 'number') return null
+    if (typeof parsed.refreshToken !== 'undefined' && typeof parsed.refreshToken !== 'string') return null
+    if (typeof parsed.refreshExpiresAt !== 'undefined' && typeof parsed.refreshExpiresAt !== 'number') return null
     return parsed
   } catch {
     return null
@@ -113,11 +118,13 @@ function clearStored(): void {
 function liveStored(): StoredSession | null {
   const s = readStored()
   if (!s) return null
-  if (isExpired(s.expiresAt)) { clearStored(); return null }
+  const accessValid = !isExpired(s.expiresAt)
+  const refreshValid = Boolean(s.refreshToken) && !isExpired(s.refreshExpiresAt)
+  if (!accessValid && !refreshValid) { clearStored(); return null }
   return s
 }
 
-/** Local session state derived from the short-lived token (no network call). */
+/** Local session state: valid access or refresh credentials count as signed in. */
 export function getSession(): Session {
   return sessionFromStored(liveStored())
 }
@@ -126,7 +133,7 @@ export function getSession(): Session {
  * Exchange a GitHub Personal Access Token for the engine's short-lived token.
  * The PAT is used ONCE by the engine to verify identity (GET api.github.com/user
  * + ALLOWED_GITHUB_USERS allowlist) and is NEVER stored in the browser; only the
- * returned opaque token (default TTL 900s, scope "client") is kept.
+ * returned access and refresh credentials are kept; the GitHub PAT is never stored.
  */
 export async function loginWithGitHubToken(githubToken: string): Promise<Session> {
   let res: Response
@@ -149,19 +156,22 @@ export async function loginWithGitHubToken(githubToken: string): Promise<Session
   // NOT fire onUnauthorized (we are not in an authenticated session yet).
   if (!res.ok) throw new ApiError(res.status, errorBody(data, res.status))
   const payload = data as Partial<TokenResponse> | null
-  if (!payload || typeof payload.token !== 'string' || typeof payload.expires_at !== 'number') {
-    throw new ApiError(res.status, { error: 'The engine returned an invalid token response.', code: 'INVALID_TOKEN_RESPONSE' })
+  if (!payload || typeof payload.token !== 'string' || typeof payload.expires_at !== 'number'
+      || typeof payload.refresh_token !== 'string' || typeof payload.refresh_expires_at !== 'number') {
+    throw new ApiError(res.status, { error: 'The engine returned an invalid session response.', code: 'INVALID_TOKEN_RESPONSE' })
   }
   writeStored({
     token: payload.token,
     expiresAt: payload.expires_at,
+    refreshToken: payload.refresh_token,
+    refreshExpiresAt: payload.refresh_expires_at,
     user: typeof payload.user === 'string' ? payload.user : 'signed-in',
     scope: typeof payload.scope === 'string' ? payload.scope : 'client',
   })
   return getSession()
 }
 
-/** Clear the short-lived token (there is no server-side session to revoke). */
+/** Clear the local access and refresh credentials. */
 export function logout(): void {
   clearStored()
 }
@@ -181,7 +191,7 @@ export interface DeviceCodePrompt {
  * Sign in with the GitHub Device Flow: request a device code, surface the
  * user_code + verification_uri via onCode, poll until GitHub grants an OAuth
  * access token, then exchange that token with the engine for the SAME
- * short-lived session token the PAT path uses. The OAuth access token is never
+ * access/refresh credentials the PAT path uses. The OAuth access token is never
  * stored in the browser.
  */
 export async function loginWithDeviceFlow(
@@ -204,6 +214,57 @@ export async function loginWithDeviceFlow(
   return loginWithGitHubToken(accessToken)
 }
 
+// ---------------------------------------------------------------- token refresh
+const ACCESS_REFRESH_SKEW_MS = 120_000
+let refreshInFlight: Promise<StoredSession> | null = null
+
+/** Renew the short-lived Engine access token without sending the user through GitHub again. */
+async function ensureAccessSession(): Promise<StoredSession | null> {
+  const stored = readStored()
+  if (!stored) return null
+  const now = Date.now()
+  if (!isExpired(stored.expiresAt, now + ACCESS_REFRESH_SKEW_MS)) return stored
+  const refreshCredential = stored.refreshToken
+  if (!refreshCredential || isExpired(stored.refreshExpiresAt, now)) {
+    clearStored()
+    onUnauthorized?.()
+    return null
+  }
+  if (refreshInFlight) return refreshInFlight
+
+  refreshInFlight = (async () => {
+    const result = await refreshEngineSession(fetch, ENGINE_URL, refreshCredential)
+    if (!result.ok) {
+      const error = new ApiError(result.status, { error: result.error, code: result.code })
+      if (result.status === 401) {
+        clearStored()
+        onUnauthorized?.()
+      }
+      throw error
+    }
+    const current = readStored()
+    if (!current || current.refreshToken !== refreshCredential) {
+      // Sign-out or a new login may have happened while the refresh request
+      // was in flight. Never resurrect that previous session.
+      if (current && !isExpired(current.expiresAt)) return current
+      throw new ApiError(0, { error: 'The session changed while it was being refreshed.', code: 'SESSION_CHANGED' })
+    }
+    const next: StoredSession = {
+      ...result.session,
+      user: result.session.user || current.user || stored.user || 'signed-in',
+      scope: result.session.scope || current.scope || stored.scope || 'client',
+    }
+    writeStored(next)
+    return next
+  })()
+
+  try {
+    return await refreshInFlight
+  } finally {
+    refreshInFlight = null
+  }
+}
+
 // ---------------------------------------------------------------- transport
 function buildHeaders(init: RequestInit): Record<string, string> {
   const headers: Record<string, string> = {}
@@ -224,7 +285,7 @@ function errorBody(data: unknown, status: number): ApiErrorBody {
 }
 async function fetchResponse(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = buildHeaders(init)
-  const stored = liveStored()
+  const stored = await ensureAccessSession()
   if (stored) headers['Authorization'] = bearerValue(stored.token)
   try {
     // Cross-origin: Authorization header instead of cookies (no same-origin
@@ -318,8 +379,9 @@ async function deviceCall<T>(
   path: string,
   init: { method?: string; body?: unknown } = {},
 ): Promise<T> {
+  const session = await ensureAccessSession()
   const result = await engineCall(fetch, ENGINE_URL, path, {
-    token: liveStored()?.token,
+    token: session?.token,
     method: init.method,
     body: init.body,
   })

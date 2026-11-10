@@ -12,6 +12,8 @@ import type {
 export interface StoredSession {
   token: string
   expiresAt: number
+  refreshToken?: string
+  refreshExpiresAt?: number
   user: string
   scope: string
 }
@@ -51,6 +53,23 @@ export function engineCall(
   path: string,
   options?: EngineCallOptions,
 ): Promise<EngineCallResult>
+export interface RefreshedEngineSession {
+  token: string
+  expiresAt: number
+  refreshToken: string
+  refreshExpiresAt: number
+  user: string
+  scope: string
+}
+export type RefreshEngineSessionResult =
+  | { ok: true; status: number; session: RefreshedEngineSession }
+  | { ok: false; status: number; error: string; code: string; data: unknown }
+export function refreshEngineSession(
+  fetchFn: typeof fetch,
+  baseUrl: string,
+  refreshToken: string,
+  nowMs?: number,
+): Promise<RefreshEngineSessionResult>
 
 export function normalizeDevice(raw: unknown): DevicesResponse['items'][number]
 export function normalizeDevices(data: unknown): DevicesResponse

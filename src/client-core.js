@@ -3,7 +3,7 @@
 // `fetch` is injected into the network helpers, and there is no import.meta.env
 // / sessionStorage access, so `node --test` can import this module directly.
 
-/** @typedef {{ token: string, expiresAt: number, user: string, scope: string }} StoredSession */
+/** @typedef {{ token: string, expiresAt: number, refreshToken?: string, refreshExpiresAt?: number, user: string, scope: string }} StoredSession */
 /** @typedef {{ authenticated: boolean, username: string | null, expiresAt: string | null }} ClientSession */
 
 export const DEFAULT_ENGINE_URL = 'https://aixodia.dpdns.org'
@@ -54,19 +54,25 @@ export function enginePath(legacyPath) {
 }
 
 /**
- * Build the public Session object from stored short-lived-token state.
+ * Build the public Session object from stored access/refresh credential state.
  * @param {StoredSession | null} stored
  * @param {number} [nowMs]
  * @returns {ClientSession}
  */
 export function sessionFromStored(stored, nowMs = Date.now()) {
-  if (!stored || isExpired(stored.expiresAt, nowMs)) {
+  if (!stored) return { authenticated: false, username: null, expiresAt: null }
+  const accessExpired = isExpired(stored.expiresAt, nowMs)
+  const refreshValid = typeof stored.refreshToken === 'string'
+    && stored.refreshToken.length > 0
+    && !isExpired(stored.refreshExpiresAt, nowMs)
+  if (accessExpired && !refreshValid) {
     return { authenticated: false, username: null, expiresAt: null }
   }
+  const effectiveExpiry = accessExpired ? stored.refreshExpiresAt : stored.expiresAt
   return {
     authenticated: true,
     username: stored.user || null,
-    expiresAt: new Date(stored.expiresAt * 1000).toISOString(),
+    expiresAt: new Date(effectiveExpiry * 1000).toISOString(),
   }
 }
 
@@ -130,6 +136,57 @@ export async function engineCall(fetchFn, baseUrl, path, options = {}) {
     }
   }
   return { ok: true, status: res.status, data }
+}
+
+/**
+ * Refresh an Engine access token. This pure helper keeps the HTTP contract
+ * injectable so success, expiry, rejection and network failures are testable.
+ *
+ * @param {typeof fetch} fetchFn
+ * @param {string} baseUrl
+ * @param {string} refreshToken
+ * @param {number} [nowMs]
+ */
+export async function refreshEngineSession(fetchFn, baseUrl, refreshToken, nowMs = Date.now()) {
+  const result = await engineCall(fetchFn, baseUrl, '/v1/auth/refresh', {
+    method: 'POST',
+    body: { refresh_token: refreshToken },
+  })
+  if (!result.ok) return result
+  const payload = (result.data && typeof result.data === 'object') ? result.data : {}
+  if (typeof payload.token !== 'string' || !payload.token
+      || typeof payload.expires_at !== 'number' || !Number.isFinite(payload.expires_at)
+      || typeof payload.refresh_token !== 'string' || !payload.refresh_token
+      || typeof payload.refresh_expires_at !== 'number' || !Number.isFinite(payload.refresh_expires_at)) {
+    return {
+      ok: false,
+      status: result.status,
+      code: 'INVALID_TOKEN_RESPONSE',
+      error: 'The engine returned an invalid refresh response.',
+      data: result.data,
+    }
+  }
+  if (isExpired(payload.expires_at, nowMs) || isExpired(payload.refresh_expires_at, nowMs)) {
+    return {
+      ok: false,
+      status: result.status,
+      code: 'INVALID_TOKEN_RESPONSE',
+      error: 'The engine returned expired refresh credentials.',
+      data: result.data,
+    }
+  }
+  return {
+    ok: true,
+    status: result.status,
+    session: {
+      token: payload.token,
+      expiresAt: payload.expires_at,
+      refreshToken: payload.refresh_token,
+      refreshExpiresAt: payload.refresh_expires_at,
+      user: typeof payload.user === 'string' ? payload.user : '',
+      scope: typeof payload.scope === 'string' ? payload.scope : 'client',
+    },
+  }
 }
 
 /** @returns {string} */

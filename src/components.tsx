@@ -378,7 +378,7 @@ export function LoginPage({
               />
               <p className="ax-login-note">
                 Used once to verify your identity with the engine; it is never stored.
-                The engine returns a short-lived session token instead.
+                The engine returns a short-lived access token that renews silently.
               </p>
               <button className="ax-github-button" type="submit" disabled={busy || !token.trim()}>
                 {busy ? <Loader2 size={19} className="spin" /> : <Github size={19} />}
