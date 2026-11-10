@@ -7,8 +7,6 @@ import { Boot, LoginPage } from './components'
 
 type Phase = 'boot' | 'login' | 'home'
 type View = 'home' | 'chat' | 'device'
-type LoginMethod = 'pat' | 'device'
-type DeviceCodeDisplay = { userCode: string; verificationUri: string }
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>('boot')
@@ -17,12 +15,46 @@ export default function App() {
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
   const [loginBusy, setLoginBusy] = useState(false)
   const [loginError, setLoginError] = useState<string | null>(null)
-  const [loginMethod, setLoginMethod] = useState<LoginMethod>('pat')
-  const [deviceCodeInfo, setDeviceCodeInfo] = useState<DeviceCodeDisplay | null>(null)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false)
   const accountMenuRef = useRef<HTMLDivElement>(null)
-  const deviceFlowAbort = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    const callback = new URL(window.location.href)
+    const code = callback.searchParams.get('code')
+    const state = callback.searchParams.get('state')
+    const oauthError = callback.searchParams.get('error')
+
+    // Android uses the same registered HTTPS callback as the dashboard. This
+    // tiny bridge returns the temporary code to the app's verified scheme URI;
+    // the PKCE verifier remains encrypted inside the Android app.
+    if (state?.startsWith('aixodia-android.')) {
+      const appCallback = new URL('aixodia://oauth/callback')
+      if (code) appCallback.searchParams.set('code', code)
+      if (state) appCallback.searchParams.set('state', state)
+      if (oauthError) appCallback.searchParams.set('error', oauthError)
+      window.location.replace(appCallback.toString())
+      return
+    }
+    if (!code && !oauthError) return
+    window.history.replaceState({}, '', window.location.pathname + window.location.hash)
+    if (oauthError || !code || !state) {
+      setLoginError(oauthError === 'access_denied' ? 'GitHub authorization was cancelled.' : 'GitHub returned an incomplete authorization response.')
+      setPhase('login')
+      return
+    }
+    setLoginBusy(true)
+    api.completeGitHubOAuth(code, state)
+      .then(next => {
+        setSession(next)
+        setPhase(next.authenticated ? 'home' : 'login')
+      })
+      .catch(error => {
+        setLoginError(error instanceof Error ? error.message : 'GitHub sign-in failed.')
+        setPhase('login')
+      })
+      .finally(() => setLoginBusy(false))
+  }, [])
 
   useEffect(() => {
     // A 401 means the Engine rejected the access/refresh credentials. Transient
@@ -80,17 +112,13 @@ export default function App() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [logoutConfirmOpen])
 
-  const handleLogin = async (githubToken: string) => {
+  const handleStartGitHubOAuth = async () => {
     setLoginBusy(true)
     setLoginError(null)
     try {
-      await api.loginWithGitHubToken(githubToken)
-      const current = api.getSession()
-      setSession(current)
-      setPhase(current.authenticated ? 'home' : 'login')
+      await api.beginGitHubOAuth()
     } catch (error) {
-      setLoginError(error instanceof Error ? error.message : 'Unable to sign in with that token.')
-    } finally {
+      setLoginError(error instanceof Error ? error.message : 'Unable to start GitHub sign-in.')
       setLoginBusy(false)
     }
   }
@@ -147,17 +175,10 @@ export default function App() {
   if (phase === 'login') {
     return (
       <LoginPage
-        onLogin={githubToken => void handleLogin(githubToken)}
-        onStartDeviceFlow={() => void handleDeviceFlow()}
-        onCancelDeviceFlow={handleCancelDeviceFlow}
-        onMethodChange={changeLoginMethod}
-        method={loginMethod}
-        deviceFlowAvailable={api.deviceFlowAvailable()}
-        deviceCodeInfo={deviceCodeInfo}
+        onStart={handleStartGitHubOAuth}
         busy={loginBusy}
         error={loginError}
-      />
-    )
+      />    )
   }
 
   return (
