@@ -18,17 +18,20 @@ export default function App() {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false)
   const accountMenuRef = useRef<HTMLDivElement>(null)
+  const oauthCallbackHandled = useRef(false)
 
   useEffect(() => {
     const callback = new URL(window.location.href)
     const code = callback.searchParams.get('code')
     const state = callback.searchParams.get('state')
     const oauthError = callback.searchParams.get('error')
+    if (oauthCallbackHandled.current) return
 
     // Android uses the same registered HTTPS callback as the dashboard. This
     // tiny bridge returns the temporary code to the app's verified scheme URI;
     // the PKCE verifier remains encrypted inside the Android app.
     if (state?.startsWith('aixodia-android.')) {
+      oauthCallbackHandled.current = true
       const appCallback = new URL('aixodia://oauth/callback')
       if (code) appCallback.searchParams.set('code', code)
       if (state) appCallback.searchParams.set('state', state)
@@ -37,6 +40,7 @@ export default function App() {
       return
     }
     if (!code && !oauthError) return
+    oauthCallbackHandled.current = true
     window.history.replaceState({}, '', window.location.pathname + window.location.hash)
     if (oauthError || !code || !state) {
       setLoginError(oauthError === 'access_denied' ? 'GitHub authorization was cancelled.' : 'GitHub returned an incomplete authorization response.')
@@ -178,7 +182,8 @@ export default function App() {
         onStart={handleStartGitHubOAuth}
         busy={loginBusy}
         error={loginError}
-      />    )
+      />
+    )
   }
 
   return (
