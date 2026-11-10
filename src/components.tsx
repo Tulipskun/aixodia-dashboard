@@ -235,34 +235,14 @@ export function OfflineState({
 // ---------------------------------------------------------------- login
 
 export function LoginPage({
-  onLogin,
-  onStartDeviceFlow,
-  onCancelDeviceFlow,
-  onMethodChange,
-  method,
-  deviceFlowAvailable,
-  deviceCodeInfo,
+  onStart,
   busy,
   error,
 }: {
-  onLogin: (githubToken: string) => void
-  onStartDeviceFlow: () => void
-  onCancelDeviceFlow: () => void
-  onMethodChange: (method: 'pat' | 'device') => void
-  method: 'pat' | 'device'
-  deviceFlowAvailable: boolean
-  deviceCodeInfo: { userCode: string; verificationUri: string } | null
+  onStart: () => void
   busy: boolean
   error: string | null
 }) {
-  const [token, setToken] = useState('')
-  const submit = (e: FormEvent) => {
-    e.preventDefault()
-    const value = token.trim()
-    if (!value || busy) return
-    onLogin(value)
-  }
-  const showDevice = deviceFlowAvailable && method === 'device'
   return (
     <main className="ax-login-page">
       <div className="ax-login-ambient" aria-hidden="true" />
@@ -302,90 +282,16 @@ export function LoginPage({
 
         <section className="ax-login-panel" aria-labelledby="ax-login-title">
           <h2 id="ax-login-title">Sign in</h2>
-
           {error && <div className="ax-login-error"><ErrorBanner message={error} /></div>}
-
-          {deviceFlowAvailable && (
-            <div className="ax-login-methods" role="tablist" aria-label="Sign-in method">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={method === 'pat'}
-                className={`ax-login-method${method === 'pat' ? ' is-active' : ''}`}
-                onClick={() => onMethodChange('pat')}
-                disabled={busy}
-              >
-                GitHub token
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={method === 'device'}
-                className={`ax-login-method${method === 'device' ? ' is-active' : ''}`}
-                onClick={() => onMethodChange('device')}
-                disabled={busy}
-              >
-                Device code
-              </button>
-            </div>
-          )}
-
-          {showDevice ? (
-            <div className="ax-login-device">
-              {deviceCodeInfo ? (
-                <>
-                  <p className="ax-login-note">
-                    Open the link below and enter this one-time code in GitHub to authorize AIxodia:
-                  </p>
-                  <div className="ax-device-code" aria-label="Your device code">{deviceCodeInfo.userCode}</div>
-                  <a className="ax-device-link" href={deviceCodeInfo.verificationUri} target="_blank" rel="noreferrer">
-                    {deviceCodeInfo.verificationUri}
-                  </a>
-                  <p className="ax-login-note ax-device-waiting">
-                    <Loader2 size={14} className="spin" /> Waiting for authorization in GitHub…
-                  </p>
-                  <button className="ax-device-cancel" type="button" onClick={onCancelDeviceFlow}>
-                    <XCircle size={16} /> Cancel sign-in
-                  </button>
-                </>
-              ) : (
-                <>
-                  <p className="ax-login-note">
-                    Sign in with your GitHub account using a one-time device code — no personal access
-                    token to create or paste. Requires a GitHub OAuth app with device flow enabled.
-                  </p>
-                  <button className="ax-github-button" type="button" onClick={onStartDeviceFlow} disabled={busy}>
-                    {busy ? <Loader2 size={19} className="spin" /> : <Github size={19} />}
-                    <span>{busy ? 'Starting…' : 'Continue with GitHub device code'}</span>
-                  </button>
-                </>
-              )}
-            </div>
-          ) : (
-            <form className="ax-login-form" onSubmit={submit}>
-              <label className="ax-login-label" htmlFor="ax-github-pat">GitHub personal access token</label>
-              <input
-                id="ax-github-pat"
-                className="ax-login-input"
-                type="password"
-                value={token}
-                onChange={event => setToken(event.target.value)}
-                placeholder="ghp_…"
-                autoComplete="off"
-                spellCheck={false}
-                disabled={busy}
-                required
-              />
-              <p className="ax-login-note">
-                Used once to verify your identity with the engine; it is never stored.
-                The engine returns a short-lived access token that renews silently.
-              </p>
-              <button className="ax-github-button" type="submit" disabled={busy || !token.trim()}>
-                {busy ? <Loader2 size={19} className="spin" /> : <Github size={19} />}
-                <span>{busy ? 'Signing in…' : 'Continue with GitHub token'}</span>
-              </button>
-            </form>
-          )}
+          <div className="ax-login-device">
+            <p className="ax-login-note">
+              Sign in securely with your GitHub account. Authorization opens in your browser and returns here automatically.
+            </p>
+            <button className="ax-github-button" type="button" onClick={onStart} disabled={busy}>
+              {busy ? <Loader2 size={19} className="spin" /> : <Github size={19} />}
+              <span>{busy ? 'Opening GitHub…' : 'Continue with GitHub'}</span>
+            </button>
+          </div>
         </section>
       </div>
     </main>
