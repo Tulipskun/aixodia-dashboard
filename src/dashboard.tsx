@@ -49,6 +49,7 @@ export function DashboardHome({ onOpenChat, onOpenDevice }: {
   const [engine, setEngine] = useState<EngineStatus | null>(null)
   const [devices, setDevices] = useState<Device[]>([])
   const [deviceError, setDeviceError] = useState('')
+  const [deviceNote, setDeviceNote] = useState<string | null>(null)
   const [loadingDevices, setLoadingDevices] = useState(true)
 
   const refreshEngine = useCallback(async () => {
@@ -59,8 +60,11 @@ export function DashboardHome({ onOpenChat, onOpenDevice }: {
     try {
       const result = await api.getDevices(refresh)
       setDevices(result.items)
+      setDeviceNote(result.note ?? null)
       setDeviceError('')
     } catch (error) {
+      setDevices([])
+      setDeviceNote(null)
       setDeviceError(error instanceof Error ? error.message : 'Unable to load devices')
     } finally {
       setLoadingDevices(false)
@@ -123,7 +127,7 @@ export function DashboardHome({ onOpenChat, onOpenDevice }: {
           ) : deviceError ? (
             <div className="empty-service error-text"><WifiOff size={18} /><span>{deviceError}</span></div>
           ) : devices.length === 0 ? (
-            <div className="empty-service"><Smartphone size={21} /><span>No DroidIME devices registered.</span></div>
+            <div className="empty-service"><Smartphone size={21} /><span>{deviceNote || 'No DroidIME devices registered.'}</span></div>
           ) : devices.map(device => (
             <div className="device-row" key={device.id}>
               <div className="device-row-icon"><Smartphone size={18} /></div>

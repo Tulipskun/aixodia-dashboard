@@ -12,9 +12,13 @@ import type {
 } from './types'
 import {
   bearerValue,
+  DEVICE_PATHS,
+  engineCall,
   enginePath,
   isExpired,
-  mcpGatewayError,
+  normalizeDeviceAction,
+  normalizeDevices,
+  normalizeDeviceTools,
   resolveEngineUrl,
   sessionFromStored,
 } from './client-core.js'
@@ -259,24 +263,43 @@ export const getEngineEvents = (runId: string, after: number) =>
 export const cancelEngineRun = (runId: string) =>
   post<{ run: EngineRun }>(`${P.runs}/${encodeURIComponent(runId)}/cancel`, {})
 
-// ---------------------------------------------------------------- devices (pending)
-// These routes used the Worker's MCP_GATEWAY service binding. There is no
-// engine equivalent yet, so fail loudly and readably instead of hitting a dead
-// endpoint; the UI already catches these and shows a message.
-function deviceError(feature: string): ApiError {
-  const e = mcpGatewayError(feature)
-  return new ApiError(e.status, { error: e.error, code: e.code })
+// ---------------------------------------------------------------- devices
+// The engine owns the device/MCP gateway routes directly. Every call carries
+// the same short-lived Bearer token as the rest of /v1/*. An empty registry
+// comes back as { devices: [], note } with HTTP 200 — normalizeDevices keeps
+// the note so the UI can show a readable message instead of an error.
+async function deviceCall<T>(
+  path: string,
+  init: { method?: string; body?: unknown } = {},
+): Promise<T> {
+  const result = await engineCall(fetch, ENGINE_URL, path, {
+    token: liveStored()?.token,
+    method: init.method,
+    body: init.body,
+  })
+  if (!result.ok) {
+    if (result.status === 401) onUnauthorized?.()
+    throw new ApiError(result.status, { error: result.error, code: result.code })
+  }
+  return result.data as T
 }
+
 export async function getDevices(_refresh = false): Promise<DevicesResponse> {
-  throw deviceError('/api/devices')
+  const data = await deviceCall<unknown>(DEVICE_PATHS.list)
+  return normalizeDevices(data)
 }
-export async function getDeviceTools(_id: string): Promise<DeviceToolsResponse> {
-  throw deviceError('/api/devices/{id}/tools')
+export async function getDeviceTools(id: string): Promise<DeviceToolsResponse> {
+  const data = await deviceCall<unknown>(DEVICE_PATHS.tools(id))
+  return normalizeDeviceTools(data)
 }
 export async function callDeviceTool(
-  _id: string,
-  _tool: string,
-  _args: Record<string, unknown> = {},
+  id: string,
+  tool: string,
+  args: Record<string, unknown> = {},
 ): Promise<DeviceActionResult> {
-  throw deviceError('/api/devices/{id}/action')
+  const data = await deviceCall<unknown>(DEVICE_PATHS.action(id), {
+    method: 'POST',
+    body: { tool, arguments: args },
+  })
+  return normalizeDeviceAction(data, id, tool)
 }

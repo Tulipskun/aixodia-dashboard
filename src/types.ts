@@ -75,6 +75,7 @@ export interface DevicesResponse {
   items: Device[]
   checkedAt: string
   ephemeral: boolean
+  note?: string | null
 }
 export interface DeviceTool {
   name: string
