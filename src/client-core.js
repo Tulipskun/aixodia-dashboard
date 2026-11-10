@@ -278,175 +278,42 @@ export function normalizeDeviceAction(data, id, tool) {
   }
 }
 
-// ---------------------------------------------------------------- GitHub Device Flow
-// A second, fully working sign-in method (enabled when VITE_GITHUB_CLIENT_ID is
-// set). The whole flow is pure: `fetch` is injected so node --test can drive the
-// state machine with a mock. The resulting GitHub OAuth access token is handed
-// to the engine's /v1/auth/token by api.ts, exactly like a pasted PAT, and only
-// the engine's short-lived token is ever kept in the browser.
+// ---------------------------------------------------------------- GitHub Authorization Code + PKCE
 
-export const GITHUB_DEVICE_CODE_URL = 'https://github.com/login/device/code'
-export const GITHUB_DEVICE_TOKEN_URL = 'https://github.com/login/oauth/access_token'
-export const DEVICE_FLOW_SCOPE = 'read:user'
-const DEVICE_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:device_code'
+export const GITHUB_AUTHORIZATION_URL = 'https://github.com/login/oauth/authorize'
 
-/** GitHub answers either JSON or form-urlencoded; accept both. @param {string} text */
-export function parseOAuth(text) {
-  if (!text || typeof text !== 'string') return {}
-  try {
-    const parsed = JSON.parse(text)
-    if (parsed && typeof parsed === 'object') return parsed
-  } catch { /* fall through to form-encoded */ }
-  const out = {}
-  try {
-    for (const [key, value] of new URLSearchParams(text)) out[key] = value
-  } catch { /* ignore malformed bodies */ }
-  return out
+/** Encode bytes as unpadded base64url (RFC 4648 §5). */
+export function base64UrlEncode(bytes) {
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '')
 }
 
-/** @param {string} code @param {string} message */
-export function deviceFlowError(code, message) {
-  const err = new Error(message)
-  err.name = 'DeviceFlowError'
-  err.code = code
-  return err
+/** Create the S256 challenge for a PKCE verifier. */
+export async function createPkceS256Challenge(verifier, subtle = globalThis.crypto?.subtle) {
+  if (typeof verifier !== 'string' || verifier.length < 43 || verifier.length > 128) {
+    throw new TypeError('PKCE verifier must contain 43–128 characters.')
+  }
+  if (!subtle || typeof subtle.digest !== 'function') {
+    throw new Error('Web Crypto SHA-256 is unavailable.')
+  }
+  const digest = await subtle.digest('SHA-256', new TextEncoder().encode(verifier))
+  return base64UrlEncode(new Uint8Array(digest))
 }
 
-/** Map GitHub device-flow error codes to messages a person can act on. */
-export function readableGitHubError(error, description) {
-  if (typeof description === 'string' && description) return description
-  switch (error) {
-    case 'expired_token': return 'The sign-in code has expired. Please start again.'
-    case 'access_denied': return 'Sign-in was declined or cancelled in GitHub.'
-    case 'incorrect_device_code': return 'GitHub rejected the device code. Please start again.'
-    case 'incorrect_client_credentials': return 'The GitHub OAuth app client id is invalid. Check VITE_GITHUB_CLIENT_ID.'
-    case 'bad_verification_code': return 'The verification code was rejected. Please start again.'
-    case 'unsupported_grant_type': return 'GitHub rejected the device-flow grant type.'
-    case 'slow_down': return 'Too many sign-in attempts; waiting a bit longer.'
-    case 'authorization_pending': return 'Waiting for authorization in GitHub…'
-    case 'NETWORK_ERROR': return 'Unable to contact GitHub to complete sign-in.'
-    default: return error ? `GitHub could not complete sign-in (${error}).` : 'GitHub could not complete sign-in.'
+/** Build the GitHub authorization URL for a validated PKCE transaction. */
+export function buildGitHubAuthorizationUrl({ clientId, redirectUri, state, challenge }) {
+  for (const [name, value] of Object.entries({ clientId, redirectUri, state, challenge })) {
+    if (typeof value !== 'string' || !value.trim()) {
+      throw new TypeError(`GitHub OAuth ${name} is required.`)
+    }
   }
-}
-
-/**
- * Step 1: ask GitHub for a device code. `onCode` is NOT called here — api.ts
- * receives the returned DeviceCodeInfo, shows `userCode` + `verificationUri` in
- * the UI, then polls with pollDeviceFlow().
- * @param {typeof fetch} fetchFn
- * @param {string} clientId
- * @param {string} [scope]
- */
-export async function requestDeviceCode(fetchFn, clientId, scope = DEVICE_FLOW_SCOPE) {
-  let res
-  try {
-    res = await fetchFn(GITHUB_DEVICE_CODE_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ client_id: clientId, scope }),
-    })
-  } catch {
-    throw deviceFlowError('NETWORK_ERROR', 'Unable to contact GitHub to start sign-in.')
-  }
-  const data = parseOAuth(typeof res.text === 'function' ? await res.text() : '')
-  if (!res.ok) {
-    throw deviceFlowError(data.error || 'HTTP_ERROR', readableGitHubError(data.error, data.error_description))
-  }
-  if (!data.device_code || !data.user_code || !data.verification_uri) {
-    throw deviceFlowError('INVALID_DEVICE_CODE_RESPONSE', 'GitHub returned an incomplete device code response.')
-  }
-  return {
-    deviceCode: String(data.device_code),
-    userCode: String(data.user_code),
-    verificationUri: String(data.verification_uri),
-    expiresIn: Number(data.expires_in) > 0 ? Number(data.expires_in) : 900,
-    interval: Number(data.interval) > 0 ? Number(data.interval) : 5,
-  }
-}
-
-/** Abort-aware sleep so the wait between polls can be cancelled immediately. */
-function abortableWait(ms, signal) {
-  return new Promise((resolve, reject) => {
-    if (!signal) {
-      setTimeout(resolve, ms)
-      return
-    }
-    if (signal.aborted) {
-      reject(deviceFlowError('DEVICE_FLOW_CANCELLED', 'Sign-in was cancelled.'))
-      return
-    }
-    const timer = setTimeout(resolve, ms)
-    signal.addEventListener('abort', () => {
-      clearTimeout(timer)
-      reject(deviceFlowError('DEVICE_FLOW_CANCELLED', 'Sign-in was cancelled.'))
-    }, { once: true })
-  })
-}
-
-/**
- * Step 2: poll until GitHub returns an access_token. Handles the documented
- * state machine: authorization_pending -> keep waiting, slow_down -> lengthen
- * the interval, expired_token / access_denied / incorrect_device_code -> a
- * readable terminal error. `wait` and `now` are injectable for deterministic
- * tests; `signal` lets the UI cancel.
- *
- * @param {typeof fetch} fetchFn
- * @param {string} clientId
- * @param {string} deviceCode
- * @param {{ interval?: number, expiresIn?: number, signal?: AbortSignal, now?: () => number, wait?: (ms: number, signal?: AbortSignal) => Promise<void> }} [options]
- * @returns {Promise<string>} the GitHub OAuth access token
- */
-export async function pollDeviceFlow(fetchFn, clientId, deviceCode, options = {}) {
-  let interval = Number(options.interval) > 0 ? Number(options.interval) : 5
-  const expiresIn = Number(options.expiresIn) > 0 ? Number(options.expiresIn) : 900
-  const now = options.now || Date.now
-  const wait = options.wait || abortableWait
-  const deadline = now() + expiresIn * 1000
-  while (true) {
-    if (options.signal?.aborted) {
-      throw deviceFlowError('DEVICE_FLOW_CANCELLED', 'Sign-in was cancelled.')
-    }
-    if (now() >= deadline) {
-      throw deviceFlowError('expired_token', 'The sign-in code has expired. Please start again.')
-    }
-    let res
-    try {
-      res = await fetchFn(GITHUB_DEVICE_TOKEN_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          client_id: clientId,
-          device_code: deviceCode,
-          grant_type: DEVICE_GRANT_TYPE,
-        }),
-      })
-    } catch {
-      throw deviceFlowError('NETWORK_ERROR', 'Unable to contact GitHub to complete sign-in.')
-    }
-    const data = parseOAuth(typeof res.text === 'function' ? await res.text() : '')
-    if (typeof data.access_token === 'string' && data.access_token) {
-      return data.access_token
-    }
-    switch (data.error) {
-      case 'authorization_pending':
-        break
-      case 'slow_down':
-        interval += 5
-        break
-      case 'expired_token':
-        throw deviceFlowError('expired_token', 'The sign-in code has expired. Please start again.')
-      case 'access_denied':
-        throw deviceFlowError('access_denied', 'Sign-in was declined or cancelled in GitHub.')
-      case 'incorrect_device_code':
-        throw deviceFlowError('incorrect_device_code', 'GitHub rejected the device code. Please start again.')
-      default: {
-        const detail = !data.error ? ` (HTTP ${res.status})` : ''
-        throw deviceFlowError(
-          data.error || 'HTTP_ERROR',
-          `${readableGitHubError(data.error, data.error_description)}${detail}`,
-        )
-      }
-    }
-    await wait(interval * 1000, options.signal)
-  }
+  const url = new URL(GITHUB_AUTHORIZATION_URL)
+  url.searchParams.set('client_id', clientId)
+  url.searchParams.set('redirect_uri', redirectUri)
+  url.searchParams.set('scope', 'read:user')
+  url.searchParams.set('state', state)
+  url.searchParams.set('code_challenge', challenge)
+  url.searchParams.set('code_challenge_method', 'S256')
+  return url.toString()
 }
