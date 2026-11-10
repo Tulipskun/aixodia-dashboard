@@ -74,3 +74,11 @@ git status --short --branch
 git add -A && git commit -m "dashboard: ..." && git push origin main
 npm ci && npm test && npm run build
 ```
+
+## Push verification (operator ร้องขอ — ให้ push ทั้งหมด + เขียนส่วนที่ push ไม่ได้ลง task)
+- วันที่ verify: 2026-11-10
+- `git rev-list --left-right --count origin/main...HEAD` → `0 0` (ahead 0, behind 0)
+- `git push origin HEAD:main` → `Everything up-to-date`
+- สรุป: ไม่มี uncommitted work, ไม่มี unpushed commit; ทุก change ถูก push ครบแล้ว
+- **ไม่มีส่วนใด push ไม่ได้** — repo นี้ sync กับ origin/main เรียบร้อย
+
