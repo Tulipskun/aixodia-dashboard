@@ -39,7 +39,7 @@ const ENGINE_URL = resolveEngineUrl(import.meta.env.VITE_ENGINE_URL)
 // its OAuth client secret is never shipped to this browser.
 const GITHUB_CLIENT_ID: string =
   (import.meta.env.VITE_GITHUB_CLIENT_ID as string | undefined)?.trim() || 'Ov23lieKSrKCRs5YKwdO'
-const GITHUB_REDIRECT_URI = `${window.location.origin.replace(/\\/+$/, '')}/`
+const GITHUB_REDIRECT_URI = `${window.location.origin.replace(/\/+$/, '')}/`
 
 // Engine-issued access + refresh credentials live in sessionStorage (per-tab,
 // cleared on tab close) — NEVER localStorage, and NEVER the user's GitHub PAT.
@@ -134,7 +134,7 @@ const OAUTH_PENDING_KEY = 'aixodia.github-oauth.pending.v1'
 function base64Url(bytes: Uint8Array): string {
   let binary = ''
   bytes.forEach(byte => { binary += String.fromCharCode(byte) })
-  return btoa(binary).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '')
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
 }
 
 /** Start GitHub authorization in the system browser with PKCE S256. */
