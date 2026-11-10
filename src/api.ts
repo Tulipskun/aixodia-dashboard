@@ -35,11 +35,11 @@ import type { StoredSession } from './client-core.js'
 // engine answers CORS itself per ALLOWED_ORIGINS.
 const ENGINE_URL = resolveEngineUrl(import.meta.env.VITE_ENGINE_URL)
 
-// Optional second sign-in method: GitHub Device Flow. Set VITE_GITHUB_CLIENT_ID
-// to an OAuth app's client id (with device flow enabled) to show it in the UI.
-// The OAuth app has no client secret — device flow is public-client safe.
+// GitHub Authorization Code + PKCE. The Engine performs the token exchange;
+// its OAuth client secret is never shipped to this browser.
 const GITHUB_CLIENT_ID: string =
-  (import.meta.env.VITE_GITHUB_CLIENT_ID as string | undefined)?.trim() ?? ''
+  (import.meta.env.VITE_GITHUB_CLIENT_ID as string | undefined)?.trim() || 'Ov23lieKSrKCRs5YKwdO'
+const GITHUB_REDIRECT_URI = `${window.location.origin.replace(/\\/+$/, '')}/`
 
 // Engine-issued access + refresh credentials live in sessionStorage (per-tab,
 // cleared on tab close) — NEVER localStorage, and NEVER the user's GitHub PAT.
@@ -129,20 +129,50 @@ export function getSession(): Session {
   return sessionFromStored(liveStored())
 }
 
-/**
- * Exchange a GitHub Personal Access Token for the engine's short-lived token.
- * The PAT is used ONCE by the engine to verify identity (GET api.github.com/user
- * + ALLOWED_GITHUB_USERS allowlist) and is NEVER stored in the browser; only the
- * returned access and refresh credentials are kept; the GitHub PAT is never stored.
- */
-export async function loginWithGitHubToken(githubToken: string): Promise<Session> {
+const OAUTH_PENDING_KEY = 'aixodia.github-oauth.pending.v1'
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = ''
+  bytes.forEach(byte => { binary += String.fromCharCode(byte) })
+  return btoa(binary).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '')
+}
+
+/** Start GitHub authorization in the system browser with PKCE S256. */
+export async function beginGitHubOAuth(): Promise<void> {
+  const verifier = base64Url(crypto.getRandomValues(new Uint8Array(32)))
+  const state = base64Url(crypto.getRandomValues(new Uint8Array(32)))
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))
+  const challenge = base64Url(new Uint8Array(digest))
+  sessionStorage.setItem(OAUTH_PENDING_KEY, JSON.stringify({
+    verifier, state, redirectUri: GITHUB_REDIRECT_URI,
+  }))
+  const authorize = new URL('https://github.com/login/oauth/authorize')
+  authorize.searchParams.set('client_id', GITHUB_CLIENT_ID)
+  authorize.searchParams.set('redirect_uri', GITHUB_REDIRECT_URI)
+  authorize.searchParams.set('scope', 'read:user')
+  authorize.searchParams.set('state', state)
+  authorize.searchParams.set('code_challenge', challenge)
+  authorize.searchParams.set('code_challenge_method', 'S256')
+  window.location.assign(authorize.toString())
+}
+
+/** Validate state and exchange the authorization code for Engine credentials. */
+export async function completeGitHubOAuth(code: string, state: string): Promise<Session> {
+  let pending: { verifier: string; state: string; redirectUri: string } | null = null
+  try { pending = JSON.parse(sessionStorage.getItem(OAUTH_PENDING_KEY) || 'null') }
+  catch { pending = null }
+  if (!pending?.verifier || pending.state !== state) {
+    throw new ApiError(0, { error: 'GitHub sign-in state did not match. Start again.', code: 'OAUTH_STATE_MISMATCH' })
+  }
   let res: Response
   try {
-    // This is the only route that does NOT require a Bearer token (it issues it).
-    res = await fetch(`${ENGINE_URL}${P.authToken}`, {
+    res = await fetch(`${ENGINE_URL}/v1/auth/github/exchange`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ github_token: githubToken }),
+      body: JSON.stringify({
+        code, code_verifier: pending.verifier,
+        redirect_uri: pending.redirectUri, client_id: GITHUB_CLIENT_ID,
+      }),
       credentials: 'omit',
       cache: 'no-store',
     })
@@ -152,8 +182,6 @@ export async function loginWithGitHubToken(githubToken: string): Promise<Session
   const text = await res.text()
   let data: unknown = null
   if (text) { try { data = JSON.parse(text) } catch { data = null } }
-  // A 401 here means an invalid/denied PAT -> surface it on the login form; do
-  // NOT fire onUnauthorized (we are not in an authenticated session yet).
   if (!res.ok) throw new ApiError(res.status, errorBody(data, res.status))
   const payload = data as Partial<TokenResponse> | null
   if (!payload || typeof payload.token !== 'string' || typeof payload.expires_at !== 'number'
@@ -161,57 +189,13 @@ export async function loginWithGitHubToken(githubToken: string): Promise<Session
     throw new ApiError(res.status, { error: 'The engine returned an invalid session response.', code: 'INVALID_TOKEN_RESPONSE' })
   }
   writeStored({
-    token: payload.token,
-    expiresAt: payload.expires_at,
-    refreshToken: payload.refresh_token,
-    refreshExpiresAt: payload.refresh_expires_at,
+    token: payload.token, expiresAt: payload.expires_at,
+    refreshToken: payload.refresh_token, refreshExpiresAt: payload.refresh_expires_at,
     user: typeof payload.user === 'string' ? payload.user : 'signed-in',
     scope: typeof payload.scope === 'string' ? payload.scope : 'client',
   })
+  sessionStorage.removeItem(OAUTH_PENDING_KEY)
   return getSession()
-}
-
-/** Clear the local access and refresh credentials. */
-export function logout(): void {
-  clearStored()
-}
-
-/** True when a GitHub OAuth app client id was provided at build time. */
-export function deviceFlowAvailable(): boolean {
-  return GITHUB_CLIENT_ID.length > 0
-}
-
-/** The two things the UI must show while the user authorizes in GitHub. */
-export interface DeviceCodePrompt {
-  userCode: string
-  verificationUri: string
-}
-
-/**
- * Sign in with the GitHub Device Flow: request a device code, surface the
- * user_code + verification_uri via onCode, poll until GitHub grants an OAuth
- * access token, then exchange that token with the engine for the SAME
- * access/refresh credentials the PAT path uses. The OAuth access token is never
- * stored in the browser.
- */
-export async function loginWithDeviceFlow(
-  onCode: (info: DeviceCodePrompt) => void,
-  signal?: AbortSignal,
-): Promise<Session> {
-  if (!GITHUB_CLIENT_ID) {
-    throw new ApiError(0, {
-      error: 'GitHub Device Flow is not configured. Set VITE_GITHUB_CLIENT_ID at build time.',
-      code: 'DEVICE_FLOW_NOT_CONFIGURED',
-    })
-  }
-  const info = await requestDeviceCode(fetch, GITHUB_CLIENT_ID)
-  onCode({ userCode: info.userCode, verificationUri: info.verificationUri })
-  const accessToken = await pollDeviceFlow(fetch, GITHUB_CLIENT_ID, info.deviceCode, {
-    interval: info.interval,
-    expiresIn: info.expiresIn,
-    signal,
-  })
-  return loginWithGitHubToken(accessToken)
 }
 
 // ---------------------------------------------------------------- token refresh
