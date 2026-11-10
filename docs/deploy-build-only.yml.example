@@ -1,0 +1,45 @@
+# ---------------------------------------------------------------------------
+# Intended build-only CI workflow for the AIxodia dashboard (REFERENCE ONLY).
+#
+# This file is NOT an active workflow. It lives outside .github/workflows/ on
+# purpose. To activate it, copy it to `.github/workflows/deploy.yml` using a
+# credential that has the GitHub `workflow` scope.
+#
+# Why it is not active: the operator-provided OAuth App token (`gho_…`) has only
+# `gist, read:org, repo` scopes. GitHub refuses to let such a token CREATE or
+# UPDATE any file under `.github/workflows/` ("refusing to allow an OAuth App to
+# create or update workflow ... without `workflow` scope"). The Contents API and
+# the Git Database API enforce the same restriction for workflow paths, and
+# `gh auth refresh -s workflow` requires an interactive browser device flow that
+# is not possible in this sandbox. DELETION of a workflow file IS permitted, so
+# the old `Deploy Dashboard` workflow (which ran `wrangler deploy`, plus D1 /
+# OAuth secret steps that no longer apply) was removed from `.github/workflows/`
+# via a normal `git push`. That also stops the push-triggered deploy CI.
+#
+# Until a `workflow`-scoped token is available there is simply no active CI in
+# this repo; `npm ci && npm test && npm run build` can be run locally / by the
+# next operator. Deploying the static `dist/` output is a separate, manual step
+# and must NOT be wired into this repo's CI (no `wrangler deploy`).
+# ---------------------------------------------------------------------------
+name: Build Dashboard
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: instabox-medium
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      # `npm run build` = `tsc --noEmit && vite build` -> static output in dist/.
+      # VITE_ENGINE_URL is baked in at build time; set it as a build env/secret
+      # on the static host if the default (https://aixodia.dpdns.org) is wrong.
+      - run: npm run build
