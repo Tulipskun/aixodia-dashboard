@@ -6,7 +6,7 @@
 
 ## Handoff (EN — read this first)
 
-**Status:** `IN PROGRESS — WORKER REMOVED (CP1), CLIENT REWRITE + DOCS PENDING; ENGINE CONTRACT IMPLEMENTED BY ANOTHER AGENT (commit 3a264a6)`.
+**Status:** `IN PROGRESS — WORKER REMOVED (CP1) + CLIENT REWRITE DONE (CP2); DOCS + FINAL npm ci/test/build VERIFY PENDING (CP3); ENGINE CONTRACT IMPLEMENTED BY ANOTHER AGENT (commit 3a264a6)`.
 **Platform blocker:** OAuth token has no `workflow` scope → GitHub blocks create/update of ANY `.github/workflows/*` file (git push, Contents API and Git DB tree API all rejected). Only DELETE is allowed, so the old `wrangler deploy` workflow was removed; the intended build-only CI is preserved at `docs/deploy-build-only.yml.example` (inactive). There is currently NO active CI in this repo. See *CP1 — ไฟล์ที่เปลี่ยน*.
 **Decisions (operator):** both clients (Android + Dashboard) talk to engine directly; engine issues a **short-lived token** instead of exposing `CF_TOKEN` to the browser.
 **Working assumption (operator declined further questions):** remove `aixodia-dashboard/worker/` (the real middleman) + stale `aixodia-engine/relay/` is handled by the engine-side agent; **KEEP** Workers KV / D1 / Named Tunnel.
@@ -50,16 +50,27 @@
 | 2 | ✅ | บันทึกคำตอบ operator ลง `task.md` | `dashboard b93148d` |
 | 3 | ✅ | **CP1** — ลบ Worker ออกจากเส้นทาง + tooling (ดูรายการไฟล์ด้านล่าง) | `82da2b8` |
 | 3b | ✅ | ลบ `.github/workflows/deploy.yml` (หยุด CI deploy; token ไม่มี `workflow` scope) + เก็บ build-only เป็น reference + แก้ `task.md` ให้ตรงความจริง | `af933f3` (+ commit นี้) |
-| 4 | ⏳ | **CP2** — เขียน `src/api.ts` ใหม่ (เรียก engine ตรง) + ปรับ `App.tsx` / LoginPage | — |
-| 5 | ⏳ | **CP3** — อัปเดต docs + รัน `npm ci && npm test && npm run build` + สรุปผล | — |
+| 4 | ✅ | **CP2** — เขียน `src/api.ts` ใหม่ (เรียก engine ตรง) + ปรับ `App.tsx` / LoginPage / `dashboard.tsx` / CSS (ดูรายการด้านล่าง) | _(this commit → ดู CP3)_ |
+| 5 | ⏳ | **CP3** — อัปเดต docs (`README`/`PRODUCT`/`DESIGN`) + รัน `npm ci && npm test && npm run build` + สรุปผล | — |
 
 ## Commit SHAs (migration — เติมทุก checkpoint)
 
 - baseline (ก่อนเริ่ม): `b93148d`
 - CP1 (Worker removal): `82da2b8`
-- CP1b (ลบ workflow + reference + fix task.md): `af933f3` + _(commit นี้ → ดู CP2)_
+- CP1b (ลบ workflow): `af933f3`
+- CP1c (reference + fix task.md): `d1b9efa`
 - CP2: _(จะกรอกใน CP3)_
 - CP3: _( = HEAD สุดท้าย, ดู `git log -1`)_
+
+## CP2 — ไฟล์ที่เปลี่ยน (client คุย engine ตรง)
+
+- **`src/api.ts`** เขียนใหม่ทั้งหมด: base URL จาก `VITE_ENGINE_URL` (default `https://aixodia.dpdns.org`) ผ่าน `resolveEngineUrl`; เก็บ short-lived token ใน `sessionStorage` (ไม่ใช่ localStorage, ไม่เก็บ PAT); `loginWithGitHubToken(githubToken)` → `POST /v1/auth/token` (ไม่ต้อง Bearer, 401 ไม่.fire onUnauthorized) แล้วเก็บ `{token,expiresAt,user,scope}`; `getSession()` อ่าน state ในเครื่อง (ไม่ hit network); `logout()` ลบ token; ทุก request ส่ง `Authorization: Bearer <token>` (`credentials: 'omit'` แทน cookie) ผ่าน `fetchResponse`; 401 → `onUnauthorized` เดิม; map path ผ่าน `enginePath()`: `/api/health`→`/healthz`, `/api/engine/v1/*`→`/v1/*`; `/api/session`, `/api/auth/github`, `/api/logout` ถูกลบ (session เป็น local + login ใช้ `/v1/auth/token`)
+- **`getDevices`/`getDeviceTools`/`callDeviceTool`** → throw `ApiError` (501, `code: MCP_GATEWAY_NOT_MIGRATED`, ข้อความอ่านเข้าใจว่า device/MCP gateway ยังไม่ได้ย้ายมา engine) ผ่าน `mcpGatewayError()`; UI catch ไว้แล้ว → build ไม่พัง; บันทึกเป็น work ค้าง
+- **`src/App.tsx`**: ตัด OAuth redirect/`/sso/github`/`auth_error`/`getHealth` ตอน boot; boot อ่าน `getSession()` ในเครื่อง; login form → `loginWithGitHubToken` → `getSession` → home; logout → `api.logout()` ล้าง token → login; `onUnauthorized` ล้าง token + กลับ login
+- **`src/components.tsx`** `LoginPage`: เปลี่ยนจากปุ่ม OAuth เป็นฟอร์ม paste GitHub PAT (`type=password`, ไม่เก็บ) + ข้อความอธิบายสั้นๆ ว่าใช้ตรวจตัวตนครั้งเดียวกับ engine แล้วได้ short-lived token แทน; props เป็น `onLogin(githubToken)` (ตัด `health`)
+- **`src/styles.css`**: เพิ่ม `.ax-login-form/-label/-input/-note`
+- **`src/dashboard.tsx`**: แก้ข้อความ error `'Unable to reach the dashboard service'` → `'Unable to reach the engine'`
+- ตรวจแล้ว: `npm test` 6/6 ผ่าน, `npm run build` ผ่าน (tsc + vite) — เป็น sanity check ก่อน CP3 จะรัน `npm ci && npm test && npm run build` ใหม่เป็นทางการ
 
 ## CP1 — ไฟล์ที่เปลี่ยน (ลบ Worker)
 
@@ -84,7 +95,9 @@
 
 ## Build / test results
 
-- CP1: ยังไม่รัน (จะรัน `npm ci && npm test && npm run build` ใน CP3 และบันทึกผล/error ที่นี่โดยไม่ปิดบัง)
+- CP1 sanity: `npm test` 6/6 ผ่าน, `npm run build` ผ่าน (หลัง `npm install` sync lock)
+- CP2 sanity: `npm test` 6/6 ผ่าน, `npm run build` ผ่าน (tsc --noEmit + vite build)
+- CP3 (ทางการ): จะรัน `npm ci && npm test && npm run build` แล้วบันทึกผล/error ตรงนี้โดยไม่ปิดบัง
 
 ## Next steps สำหรับ AI ที่รับช่วง
 

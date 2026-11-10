@@ -235,16 +235,21 @@ export function OfflineState({
 // ---------------------------------------------------------------- login
 
 export function LoginPage({
-  onGithubLogin,
+  onLogin,
   busy,
   error,
-  health,
 }: {
-  onGithubLogin: () => void
+  onLogin: (githubToken: string) => void
   busy: boolean
   error: string | null
-  health: Health | null
 }) {
+  const [token, setToken] = useState('')
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    const value = token.trim()
+    if (!value || busy) return
+    onLogin(value)
+  }
   return (
     <main className="ax-login-page">
       <div className="ax-login-ambient" aria-hidden="true" />
@@ -287,15 +292,29 @@ export function LoginPage({
 
           {error && <div className="ax-login-error"><ErrorBanner message={error} /></div>}
 
-          <button
-            className="ax-github-button"
-            type="button"
-            onClick={onGithubLogin}
-            disabled={busy || !health?.authConfigured}
-          >
-            {busy ? <Loader2 size={19} className="spin" /> : <Github size={19} />}
-            <span>{busy ? 'Signing in…' : 'Continue with GitHub'}</span>
-          </button>
+          <form className="ax-login-form" onSubmit={submit}>
+            <label className="ax-login-label" htmlFor="ax-github-pat">GitHub personal access token</label>
+            <input
+              id="ax-github-pat"
+              className="ax-login-input"
+              type="password"
+              value={token}
+              onChange={event => setToken(event.target.value)}
+              placeholder="ghp_…"
+              autoComplete="off"
+              spellCheck={false}
+              disabled={busy}
+              required
+            />
+            <p className="ax-login-note">
+              Used once to verify your identity with the engine; it is never stored.
+              The engine returns a short-lived session token instead.
+            </p>
+            <button className="ax-github-button" type="submit" disabled={busy || !token.trim()}>
+              {busy ? <Loader2 size={19} className="spin" /> : <Github size={19} />}
+              <span>{busy ? 'Signing in…' : 'Continue with GitHub token'}</span>
+            </button>
+          </form>
         </section>
       </div>
     </main>

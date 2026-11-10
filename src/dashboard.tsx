@@ -53,7 +53,7 @@ export function DashboardHome({ onOpenChat, onOpenDevice }: {
 
   const refreshEngine = useCallback(async () => {
     try { setEngine(await api.getEngineStatus()) }
-    catch { setEngine({ configured: false, online: false, checkedAt: new Date().toISOString(), metrics: null, reason: 'Unable to reach the dashboard service' }) }
+    catch { setEngine({ configured: false, online: false, checkedAt: new Date().toISOString(), metrics: null, reason: 'Unable to reach the engine' }) }
   }, [])
   const refreshDevices = useCallback(async (refresh = false) => {
     try {
