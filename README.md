@@ -1,67 +1,94 @@
 # AIxodia Dashboard
 
-A static React/Vite + TypeScript single-page app for the AIxodia console. **It talks to the AIxodia Engine directly** — there is no Cloudflare Worker in the request path anymore. The SPA is served as static files (`dist/`) and calls the engine's HTTP API cross-origin with a short-lived bearer token.
+A static React/Vite + TypeScript single-page app for the AIxodia console. The browser talks directly to the AIxodia Engine through its Named Tunnel; there is no Cloudflare Worker in the request path. The SPA is published as static files from `dist/`.
 
-## Architecture (after worker removal)
+## Architecture
 
+```text
+Browser / Dashboard
+  1. Opens GitHub in the browser (Authorization Code + PKCE, S256)
+  2. GitHub redirects to https://dashboard.aixodia.dpdns.org
+  3. Dashboard validates OAuth state and sends the one-time code +
+     PKCE verifier to POST /v1/auth/github/exchange
+  4. Engine exchanges the code with GitHub using its server-side
+     OAuth client secret, checks the account allowlist, and issues
+     an Engine access token + refresh credential
+  5. Dashboard sends Authorization: Bearer <Engine access token>
+     and silently refreshes with POST /v1/auth/refresh
+                         |
+                         v
+AIxodia Engine — https://aixodia.dpdns.org
+  Cloudflare Named Tunnel → 127.0.0.1:8787
 ```
-browser (this SPA)
-   │  sign in:
-   │    POST /v1/auth/token  { github_token }        (no auth needed)
-   │    ← { token, expires_at, refresh_token, refresh_expires_at, user, scope }
-   │  POST /v1/auth/refresh { refresh_token } before access expiry
-   │  every other request: Authorization: Bearer <short-lived access token>
-   │    /healthz, /v1/sessions*, /v1/runs*,
-   │    /v1/devices, /v1/devices/{id}/tools, /v1/devices/{id}/action
-   ▼
-AIxodia Engine  https://aixodia.dpdns.org   (Named Tunnel → 127.0.0.1:8787)
+
+The browser does not receive the GitHub client secret, a GitHub OAuth access token, or `CF_TOKEN`. It stores only Engine-issued session credentials in `sessionStorage` (per-tab). The OAuth PKCE verifier and state are short-lived and kept in the pending browser session while authorization is in progress.
+
+The old `worker/` directory has been removed. Workers KV, D1 and the Named Tunnel remain in the backend architecture, but browser API calls go directly to the Engine. The Engine owns the device/MCP gateway routes; the device list is read from Workers KV `DEVICE_TUNNELS`.
+
+## GitHub sign-in
+
+The only Dashboard sign-in method is GitHub Authorization Code + PKCE (S256). There is no PAT paste form and no Device Flow code prompt.
+
+1. The user selects **Continue with GitHub**. The Dashboard creates a high-entropy PKCE verifier and random `state`, derives an S256 challenge, and opens GitHub's authorization page.
+2. GitHub redirects to the registered Dashboard callback with a one-time authorization code and state.
+3. The Dashboard checks the returned state against the pending session, then calls Engine `POST /v1/auth/github/exchange` with the code, PKCE verifier, redirect URI and public client ID.
+4. The Engine exchanges the authorization code with GitHub. The GitHub OAuth client secret exists only in Engine environment/KV; it must never be placed in `VITE_*` variables, source code, or the browser bundle.
+5. The Engine validates the GitHub user against `ALLOWED_GITHUB_USERS` and returns its own access and refresh credentials. Those credentials are used for all subsequent Engine requests.
+
+The GitHub OAuth App callback URL must be exactly:
+
+```text
+https://dashboard.aixodia.dpdns.org
 ```
 
-The old `worker/` directory (which proxied `/api/*`, injected `CF_TOKEN`, owned GitHub OAuth + D1 sessions + the MCP device gateway) was removed. Workers KV / D1 / the Named Tunnel remain, but the browser no longer goes through a Worker. The engine now owns the device/MCP gateway routes directly and calls the MCP upstream itself (with timeout/retry); the device list comes from the Workers KV `DEVICE_TUNNELS` namespace.
+Android uses the same HTTPS callback: the Dashboard recognizes the Android-specific state prefix and forwards the temporary code/state to the app's `aixodia://oauth/callback` deep link. Android retains the PKCE verifier in encrypted app storage and exchanges the code through the Engine.
 
-## Authentication — two working methods
+## Engine session lifetime
 
-Both methods end with the same Engine-issued access + refresh credentials. The access token lasts 15 minutes by default and is renewed silently 2 minutes before expiry using `POST /v1/auth/refresh`; the refresh credential lasts 365 days and survives Engine restarts. Only those Engine credentials are kept in **`sessionStorage`** (per-tab, cleared on tab close). The GitHub PAT, GitHub OAuth access token, and `CF_TOKEN` are never stored in the browser. Every API request carries `Authorization: Bearer <access token>` (`credentials: 'omit'`, no cookies). A temporary refresh/network failure preserves the session; a rejected/expired refresh credential returns to login. Logout clears both local credentials.
+The Engine access token defaults to 15 minutes. The client refreshes it silently 2 minutes before expiry through `POST /v1/auth/refresh`. The stateless Engine refresh credential lasts 365 days by default and survives Engine restarts. A temporary network failure does not discard the stored refresh credential. A rejected or expired refresh credential requires a new GitHub sign-in. Logout clears the local access and refresh credentials.
 
-1. **GitHub Personal Access Token (PAT) — default.** The user pastes a PAT into the sign-in form. The SPA sends it once to `POST /v1/auth/token`; the engine calls `GET https://api.github.com/user`, checks the login against its `ALLOWED_GITHUB_USERS` allowlist, and returns `{ token, expires_at, refresh_token, refresh_expires_at, user, scope: "client" }` (default access TTL 900s; refresh TTL 365 days). No OAuth app, client secret, or redirect is needed.
-2. **GitHub Device Flow — enabled with `VITE_GITHUB_CLIENT_ID`.** When a GitHub OAuth app client id (with device flow enabled) is configured, the login page shows a second method:
-   - `POST https://github.com/login/device/code` with `scope=read:user` → the UI displays the returned `user_code` and `verification_uri`.
-   - The SPA polls `POST https://github.com/login/oauth/access_token` until GitHub returns an `access_token`: it keeps polling while GitHub reports the user has not authorized yet, lengthens the interval on `slow_down`, and surfaces `expired_token` / `access_denied` as clear, readable errors. A cancel button aborts the flow.
-   - The resulting GitHub OAuth access token is sent to `POST /v1/auth/token` as `github_token` — exactly like a PAT — and exchanged for the same access/refresh credentials. No client secret is used (device flow is public-client safe).
+The legacy `POST /v1/auth/token` route remains in the Engine for older/administrative clients, but the Dashboard login UI does not use a PAT or master token.
 
 ## Configuration
 
-| Where | Variable | Meaning |
+| Where | Variable / setting | Meaning |
 | --- | --- | --- |
-| Build (this repo) | `VITE_ENGINE_URL` | Engine base URL, baked in at build time. Default `https://aixodia.dpdns.org`. |
-| Build (this repo) | `VITE_GITHUB_CLIENT_ID` | Optional. Client id of a GitHub OAuth app with device flow enabled; enables the second sign-in method. No client secret. |
-| Engine | `ALLOWED_GITHUB_USERS` | Comma-separated GitHub logins allowed to obtain a token. |
-| Engine | `ALLOWED_ORIGINS` | CORS allowlist; must include the dashboard origin, e.g. `https://dashboard.aixodia.dpdns.org,http://localhost:5173`. |
+| Dashboard build | `VITE_ENGINE_URL` | Engine base URL. Default: `https://aixodia.dpdns.org`. |
+| Dashboard build | `VITE_GITHUB_CLIENT_ID` | Optional override for the public GitHub OAuth App client ID. The production App ID is the built-in default. This is public and is not a secret. |
+| GitHub OAuth App | Callback URL | Set to `https://dashboard.aixodia.dpdns.org`. |
+| Engine environment | `GITHUB_CLIENT_ID` | Optional override for the public OAuth client ID; default matches the Dashboard/Android build. |
+| Engine environment | `GITHUB_CLIENT_SECRET` | Required server-side OAuth client secret. Never expose it to the browser or APK. |
+| Engine Workers KV | `AIXODIA_CONFIG/client/github_client_secret` | Alternative server-side location for the OAuth client secret when the environment variable is not set. |
+| Engine environment / KV | `GITHUB_REDIRECT_URI` | Optional exact redirect URI override; default is `https://dashboard.aixodia.dpdns.org`. Must match the GitHub OAuth App callback and client request. |
+| Engine environment / KV | `ALLOWED_GITHUB_USERS` / `client/allowed_users` | Comma-separated GitHub logins allowed to sign in. |
+| Engine environment / KV | `ALLOWED_ORIGINS` / `client/allowed_origins` | CORS allowlist. Include `https://dashboard.aixodia.dpdns.org` and local development origin when needed. |
 
-The engine answers CORS itself and binds `127.0.0.1:8787` behind the Named Tunnel `https://aixodia.dpdns.org`. See `.env.example` for a copyable template.
+The client secret is sensitive. Configure it only on the Engine (environment or Workers KV) and never commit or print its value. Engine CORS is enforced by the Engine itself.
 
-### Devices
+## Devices
 
-`GET /v1/devices`, `GET /v1/devices/{id}/tools`, and `POST /v1/devices/{id}/action` are called with an automatically renewed short-lived access token. When the device registry is empty, the engine returns `{ devices: [], note }` (HTTP 200); the dashboard shows that `note` as a readable message instead of an error, and renders the device list, online status, tools, and action results (including screenshots) when devices are registered.
+The Dashboard calls `GET /v1/devices`, `GET /v1/devices/{id}/tools`, and `POST /v1/devices/{id}/action` directly with an automatically renewed Engine access token. When the device registry is empty, the Engine returns `{ devices: [], note }` with HTTP 200; the Dashboard displays the note instead of treating the empty registry as an error. When devices are registered, the UI shows online status, available tools and action results, including screenshots.
 
-### Local development
+## Local development
 
 ```sh
 npm ci
-# point at a local engine; the engine must list http://localhost:5173 in ALLOWED_ORIGINS
+# The Engine CORS allowlist must include http://localhost:5173.
 VITE_ENGINE_URL=http://127.0.0.1:8787 npm run dev
 ```
 
-Alternatively use the Vite dev proxy: set `VITE_ENGINE_URL=/engine`; `vite.config.ts` forwards `/engine/*` → `http://127.0.0.1:8787` and strips the prefix (so the engine sees `/v1/*`, `/healthz`, …). This keeps requests same-origin during dev. With `VITE_ENGINE_URL` unset, the app targets the production tunnel.
+Alternatively, set `VITE_ENGINE_URL=/engine`; the Vite dev proxy forwards `/engine/*` to `http://127.0.0.1:8787` and strips the prefix. When `VITE_ENGINE_URL` is unset, the app targets the production Named Tunnel.
 
-## Build, test, and deploy
+The production OAuth redirect is fixed to the registered HTTPS callback. Local OAuth sign-in therefore requires a separately registered GitHub OAuth callback and matching Engine `GITHUB_REDIRECT_URI`; local API development does not by itself configure that callback.
+
+## Build, test and publish
 
 ```sh
 npm ci
-npm test          # node --test: client-core, refresh contract, device endpoints and device-flow tests (mock fetch)
-npm run build     # tsc --noEmit && vite build -> static output in dist/
+npm test       # Node tests for session refresh, device endpoints and PKCE helpers
+npm run build  # tsc --noEmit && vite build; static output is in dist/
 ```
 
-`npm run build` is type-check + static bundle only. **Do not run `wrangler deploy` / `npm run deploy`** — there is no Worker to deploy. Publishing `dist/` to a static host (e.g. Cloudflare Pages) is a separate, manual step.
+`npm run build` only type-checks and builds the static bundle. There is no Worker to deploy; do not run `wrangler deploy` or assume a successful build updates the production website. Publishing `dist/` to the configured static host (for example, Cloudflare Pages) is a separate deployment step.
 
-**CI note:** this repo has no active GitHub Actions workflow. Activating the build-only workflow under `.github/workflows/*` is handled outside this repo with a credential that has the `workflow` scope; the intended workflow content is preserved at `docs/deploy-build-only.yml.example` for reference. This repo does not modify `.github/workflows/*` and does not deploy.
+This repository currently has no active GitHub Actions workflow. The previous build-only workflow example is retained at `docs/deploy-build-only.yml.example`; enabling a GitHub Actions workflow requires the appropriate `workflow` permission and an explicit deployment configuration.
