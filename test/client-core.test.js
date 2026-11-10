@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { webcrypto } from 'node:crypto'
 import {
   DEFAULT_ENGINE_URL,
   resolveEngineUrl,
@@ -8,20 +9,15 @@ import {
   enginePath,
   sessionFromStored,
   DEVICE_PATHS,
+  base64UrlEncode,
+  createPkceS256Challenge,
+  buildGitHubAuthorizationUrl,
   engineCall,
   refreshEngineSession,
   normalizeDevice,
   normalizeDevices,
   normalizeDeviceTools,
   normalizeDeviceAction,
-  GITHUB_DEVICE_CODE_URL,
-  GITHUB_DEVICE_TOKEN_URL,
-  DEVICE_FLOW_SCOPE,
-  parseOAuth,
-  deviceFlowError,
-  readableGitHubError,
-  requestDeviceCode,
-  pollDeviceFlow,
 } from '../src/client-core.js'
 
 // These tests cover the pure client-core helpers that back the direct-engine
@@ -342,163 +338,44 @@ test('normalizeDevices/normalizeDeviceTools never throw on null or malformed bod
   assert.equal(normalizeDevices(rawResponse('not json')).items.length, 0)
 })
 
-// ---------------------------------------------------------------- device flow (mock fetch)
+// ---------------------------------------------------------------- GitHub PKCE
 
-test('device flow constants point at GitHub and use the read:user scope', () => {
-  assert.equal(GITHUB_DEVICE_CODE_URL, 'https://github.com/login/device/code')
-  assert.equal(GITHUB_DEVICE_TOKEN_URL, 'https://github.com/login/oauth/access_token')
-  assert.equal(DEVICE_FLOW_SCOPE, 'read:user')
+test('base64UrlEncode uses URL-safe alphabet and omits padding', () => {
+  assert.equal(base64UrlEncode(new Uint8Array([0xfb, 0xff, 0xef])), '-__v')
 })
 
-test('parseOAuth accepts JSON and form-urlencoded bodies', () => {
-  assert.deepEqual(parseOAuth('{"access_token":"gho_x","error":null}'), { access_token: 'gho_x', error: null })
-  assert.deepEqual(parseOAuth('access_token=gho_x&scope=read%3Auser&token_type=bearer'), {
-    access_token: 'gho_x', scope: 'read:user', token_type: 'bearer',
-  })
-  assert.deepEqual(parseOAuth(''), {})
-})
-
-test('readableGitHubError gives actionable messages for terminal device-flow errors', () => {
-  assert.match(readableGitHubError('expired_token'), /expired/i)
-  assert.match(readableGitHubError('access_denied'), /declined|cancelled/i)
-  assert.match(readableGitHubError('slow_down'), /attempts/i)
-  assert.equal(readableGitHubError('weird', 'GitHub said nope'), 'GitHub said nope')
-  assert.match(readableGitHubError(undefined), /could not complete/i)
-  const err = deviceFlowError('CUSTOM', 'boom')
-  assert.equal(err.code, 'CUSTOM')
-  assert.equal(err.message, 'boom')
-  assert.ok(err instanceof Error)
-})
-
-test('requestDeviceCode POSTs client_id + scope and returns the code to display', async () => {
-  const body = {
-    device_code: 'dc_123', user_code: 'WDJB-MJHT',
-    verification_uri: 'https://github.com/login/device',
-    expires_in: 900, interval: 5,
-  }
-  const fetchFn = createFetch([jsonResponse(body)])
-  const info = await requestDeviceCode(fetchFn, 'Iv1.clientid')
-  assert.equal(fetchFn.calls[0].url, GITHUB_DEVICE_CODE_URL)
-  assert.equal(fetchFn.calls[0].init.method, 'POST')
-  assert.equal(fetchFn.calls[0].init.headers.Accept, 'application/json')
-  assert.deepEqual(JSON.parse(fetchFn.calls[0].init.body), { client_id: 'Iv1.clientid', scope: 'read:user' })
-  assert.equal(info.deviceCode, 'dc_123')
-  assert.equal(info.userCode, 'WDJB-MJHT')
-  assert.equal(info.verificationUri, 'https://github.com/login/device')
-  assert.equal(info.expiresIn, 900)
-  assert.equal(info.interval, 5)
-})
-
-test('requestDeviceCode accepts a form-encoded device code response', async () => {
-  const fetchFn = createFetch([rawResponse('device_code=dc&user_code=ABCD-1234&verification_uri=https%3A%2F%2Fgithub.com%2Flogin%2Fdevice&expires_in=900&interval=5')])
-  const info = await requestDeviceCode(fetchFn, 'Iv1.clientid')
-  assert.equal(info.userCode, 'ABCD-1234')
-  assert.equal(info.verificationUri, 'https://github.com/login/device')
-})
-
-test('requestDeviceCode surfaces a readable error on a non-2xx and on bad payloads', async () => {
-  const bad = createFetch([jsonResponse({ error: 'incorrect_client_credentials', error_description: 'Bad client id' }, { ok: false, status: 401 })])
-  await assert.rejects(() => requestDeviceCode(bad, 'nope'), (e) => {
-    assert.equal(e.code, 'incorrect_client_credentials')
-    assert.equal(e.message, 'Bad client id')
-    return true
-  })
-  const incomplete = createFetch([jsonResponse({ device_code: 'dc' })])
-  await assert.rejects(() => requestDeviceCode(incomplete, 'Iv1.clientid'), /incomplete device code/i)
-  const offline = createFetch([new Error('offline')])
-  await assert.rejects(() => requestDeviceCode(offline, 'Iv1.clientid'), /Unable to contact GitHub to start/i)
-})
-
-test('pollDeviceFlow returns the access_token after authorization_pending', async () => {
-  const waits = []
-  const fetchFn = createFetch([
-    jsonResponse({ error: 'authorization_pending' }),
-    jsonResponse({ access_token: 'gho_access', token_type: 'bearer', scope: 'read:user' }),
-  ])
-  const token = await pollDeviceFlow(fetchFn, 'Iv1.clientid', 'dc_123', {
-    interval: 5, expiresIn: 900,
-    wait: async (ms) => { waits.push(ms) },
-  })
-  assert.equal(token, 'gho_access')
-  assert.equal(fetchFn.calls.length, 2)
-  assert.equal(waits.length, 1)
-  assert.equal(waits[0], 5000)
-  const body = JSON.parse(fetchFn.calls[0].init.body)
-  assert.equal(body.client_id, 'Iv1.clientid')
-  assert.equal(body.device_code, 'dc_123')
-  assert.equal(body.grant_type, 'urn:ietf:params:oauth:grant-type:device_code')
-  assert.equal(fetchFn.calls[0].url, GITHUB_DEVICE_TOKEN_URL)
-})
-
-test('pollDeviceFlow lengthens the interval on slow_down', async () => {
-  const waits = []
-  const fetchFn = createFetch([
-    jsonResponse({ error: 'authorization_pending' }),
-    jsonResponse({ error: 'slow_down' }),
-    jsonResponse({ access_token: 'gho_ok' }),
-  ])
-  const token = await pollDeviceFlow(fetchFn, 'Iv1.clientid', 'dc', {
-    interval: 5, wait: async (ms) => { waits.push(ms) },
-  })
-  assert.equal(token, 'gho_ok')
-  assert.deepEqual(waits, [5000, 10000])
-})
-
-test('pollDeviceFlow maps expired_token / access_denied / unknown errors to readable messages', async () => {
-  for (const [code, matcher] of [
-    ['expired_token', /expired/i],
-    ['access_denied', /declined|cancelled/i],
-    ['incorrect_device_code', /rejected/i],
-    ['mystery_code', /could not complete/i],
-  ]) {
-    const fetchFn = createFetch([jsonResponse({ error: code })])
-    await assert.rejects(
-      () => pollDeviceFlow(fetchFn, 'Iv1.clientid', 'dc', { wait: async () => {} }),
-      (e) => { assert.equal(e.code, code); assert.match(e.message, matcher); return true },
-    )
-  }
-})
-
-test('pollDeviceFlow reports the HTTP status when GitHub gives no error code', async () => {
-  const fetchFn = createFetch([rawResponse('server exploded', { ok: false, status: 502 })])
-  await assert.rejects(
-    () => pollDeviceFlow(fetchFn, 'Iv1.clientid', 'dc', { wait: async () => {} }),
-    (e) => { assert.match(e.message, /HTTP 502/); return true },
+test('createPkceS256Challenge matches the RFC 7636 S256 example', async () => {
+  const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk'
+  assert.equal(
+    await createPkceS256Challenge(verifier, webcrypto.subtle),
+    'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
   )
 })
 
-test('pollDeviceFlow stops immediately on an already-aborted signal', async () => {
-  const controller = new AbortController()
-  controller.abort()
-  const fetchFn = createFetch([]) // abort is detected before any network call
-  await assert.rejects(
-    () => pollDeviceFlow(fetchFn, 'Iv1.clientid', 'dc', {
-      signal: controller.signal,
-      wait: async () => {},
-    }),
-    (e) => { assert.equal(e.code, 'DEVICE_FLOW_CANCELLED'); assert.match(e.message, /cancelled/i); return true },
-  )
-  assert.equal(fetchFn.calls.length, 0)
+test('createPkceS256Challenge rejects malformed verifier and unavailable Web Crypto', async () => {
+  await assert.rejects(() => createPkceS256Challenge('too-short', webcrypto.subtle), /43–128/)
+  await assert.rejects(() => createPkceS256Challenge('x'.repeat(43), null), /Web Crypto/)
 })
 
-test('pollDeviceFlow enforces the expiry deadline even if GitHub keeps saying pending', async () => {
-  let nowCalls = 0
-  const fetchFn = createFetch([]) // deadline is hit before any network call
-  await assert.rejects(
-    () => pollDeviceFlow(fetchFn, 'Iv1.clientid', 'dc', {
-      expiresIn: 1,
-      now: () => (nowCalls++ === 0 ? 0 : 2_000),
-      wait: async () => {},
-    }),
-    (e) => { assert.equal(e.code, 'expired_token'); assert.match(e.message, /expired/i); return true },
-  )
-  assert.equal(fetchFn.calls.length, 0)
+test('buildGitHubAuthorizationUrl includes redirect, state and S256 challenge', () => {
+  const value = buildGitHubAuthorizationUrl({
+    clientId: 'Iv1.clientid',
+    redirectUri: 'https://dashboard.example',
+    state: 'state-random',
+    challenge: 'challenge-random',
+  })
+  const url = new URL(value)
+  assert.equal(url.origin + url.pathname, 'https://github.com/login/oauth/authorize')
+  assert.equal(url.searchParams.get('client_id'), 'Iv1.clientid')
+  assert.equal(url.searchParams.get('redirect_uri'), 'https://dashboard.example')
+  assert.equal(url.searchParams.get('scope'), 'read:user')
+  assert.equal(url.searchParams.get('state'), 'state-random')
+  assert.equal(url.searchParams.get('code_challenge'), 'challenge-random')
+  assert.equal(url.searchParams.get('code_challenge_method'), 'S256')
 })
 
-test('pollDeviceFlow surfaces a transport failure as NETWORK_ERROR', async () => {
-  const fetchFn = createFetch([new Error('offline')])
-  await assert.rejects(
-    () => pollDeviceFlow(fetchFn, 'Iv1.clientid', 'dc', { wait: async () => {} }),
-    (e) => { assert.equal(e.code, 'NETWORK_ERROR'); assert.match(e.message, /Unable to contact GitHub/); return true },
-  )
+test('buildGitHubAuthorizationUrl rejects incomplete OAuth transactions', () => {
+  assert.throws(() => buildGitHubAuthorizationUrl({
+    clientId: 'Iv1.clientid', redirectUri: 'https://dashboard.example', state: '', challenge: 'challenge',
+  }), /state is required/)
 })
