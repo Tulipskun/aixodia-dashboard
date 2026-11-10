@@ -1,4 +1,0 @@
-GITHUB_CLIENT_ID=your_github_oauth_app_client_id
-GITHUB_CLIENT_SECRET=your_github_oauth_app_client_secret
-APP_ORIGIN=https://your-current-quick-tunnel.trycloudflare.com
-ALLOWED_GITHUB_USERS=Tulipskun

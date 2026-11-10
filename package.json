@@ -7,11 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "node --test",
-    "dev:worker": "wrangler dev --local",
-    "db:migrate:local": "wrangler d1 migrations apply aixodia-dashboard --local",
-    "deploy": "npm run build && wrangler deploy",
-    "db:migrate:remote": "wrangler d1 migrations apply aixodia-dashboard --remote"
+    "test": "node --test"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -23,7 +19,6 @@
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.7.2",
-    "vite": "^6.0.5",
-    "wrangler": "^4.45.0"
+    "vite": "^6.0.5"
   }
 }

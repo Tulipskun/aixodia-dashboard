@@ -5,6 +5,3 @@ dist/
 .env.*
 !.env.example
 .DS_Store
-
-.dev.vars
-.wrangler/
