@@ -11,7 +11,7 @@
 - **Repos (all `main`, owner `Tulipskun`):** `Tulipskun/aixodia-engine`, `Tulipskun/AIxodia`, `Tulipskun/aixodia-dashboard`
 - **Local clone ที่ทำงาน:** `/workspace/aixodia-work/aixodia-dashboard` — repo เดียวที่แก้
 - **Auth:** `gh auth status` OK as `Tulipskun`; per-repo git identity พร้อม; push ผ่าน `gh auth setup-git`
-- **Hard constraints ที่ถือปฏิบัติ:** commit + push ทุกขั้น; **ไม่ deploy**; แตะเฉพาะ repo นี้; **ไม่แตะ `.github/workflows/*`** (อีกคนจัดการ)
+- **Hard constraints ที่ถือปฏิบัติ:** commit + push ทุกขั้น; **ไม่ deploy**; แตะเฉพาะ repo นี้; **ไม่แตะ `.github/workflows/*`** (worker หายไปจึงไม่มี deploy workflow; build-only template อยู่ที่ `docs/deploy-build-only.yml.example`)
 
 ## Login — สองวิธี ใช้งานได้แล้ว
 
@@ -31,10 +31,10 @@
 - กรณี `{ devices: [], note }` (registry ว่าง) เป็น **HTTP 200 ที่สำเร็จ** → `normalizeDevices` เก็บ `note` → หน้า Dashboard แสดงข้อความอ่านรู้เรื่องแทน error (ไม่ throw)
 - error code และ helper แจ้ง error เดิมของ device/MCP gateway ถูกลบออกจากโค้ดทั้งหมดแล้ว (ฟังก์ชัน devices เรียก engine ตรงแทน)
 
-## CI workflow — เรื่องเดียวที่อยู่นอกเหนือ repo นี้ (ไม่ใช่งานใน repo นี้)
+## CI workflow — การตัดสินใจโดยเจตนา (ไม่ใช่งานค้าง)
 
-- การ activate GitHub Actions workflow ใต้ `.github/workflows/*` เป็นเรื่องระดับบัญชี/credential (token ต้องมี `workflow` scope) และถูกจัดการโดยอีกคนหนึ่ง (another agent) ตามคำสั่ง
-- repo นี้ **ไม่แตะ** `.github/workflows/*`; เนื้อหา build-only workflow เก็บเป็น `docs/deploy-build-only.yml.example` เพื่อใช้อ้างอิง
+- ไฟล์ `.github/workflows/deploy.yml` (Cloudflare Worker deploy) **ถูกลบไปแล้ว** เพราะ Worker หายไป ทำให้ deploy pipeline นี้หมดความหมาย — นี่คือผลลัพธ์โดยธรรมชาติของการเอา worker ออก ไม่ใช่งานที่ทิ้งค้าง
+- repo นี้ **ไม่มี workflow ใต้ `.github/workflows/*`**; หากต้องการ CI คืนมา (build-only สำหรับ static SPA) ให้ copy `docs/deploy-build-only.yml.example` ไป `.github/workflows/ci.yml` — การสร้าง/แก้ไฟล์ workflow ต้องการ token ที่มี scope `workflow` (token `gho_…` ปัจจุบันไม่มี) รัน `gh auth refresh -h github.com -s workflow` ก่อน
 - **ไม่มีการ deploy** จาก repo นี้; การ publish `dist/` ไป static host เป็นขั้นตอนแยก (manual)
 - repo นี้เสร็จสมบูรณ์แล้ว ทุกส่วนใน repo นี้ทำงานได้ครบถ้วน
 
