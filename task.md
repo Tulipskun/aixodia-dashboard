@@ -6,7 +6,7 @@
 
 ## Handoff (EN — read this first)
 
-**Status:** `IN PROGRESS — WORKER REMOVED (CP1) + CLIENT REWRITE DONE (CP2); DOCS + FINAL npm ci/test/build VERIFY PENDING (CP3); ENGINE CONTRACT IMPLEMENTED BY ANOTHER AGENT (commit 3a264a6)`.
+**Status:** `DONE FOR THIS REPO (CP1–CP3 complete) — Worker removed, client talks to engine directly, PAT→short-lived-token auth, docs updated, npm ci && npm test && npm run build all pass, tree clean & fully pushed. Remaining items below are operator/external decisions (device/MCP gateway, OAuth PKCE, CI activation with a workflow-scoped token, engine env). ENGINE CONTRACT IMPLEMENTED BY ANOTHER AGENT (commit 3a264a6)`.
 **Platform blocker:** OAuth token has no `workflow` scope → GitHub blocks create/update of ANY `.github/workflows/*` file (git push, Contents API and Git DB tree API all rejected). Only DELETE is allowed, so the old `wrangler deploy` workflow was removed; the intended build-only CI is preserved at `docs/deploy-build-only.yml.example` (inactive). There is currently NO active CI in this repo. See *CP1 — ไฟล์ที่เปลี่ยน*.
 **Decisions (operator):** both clients (Android + Dashboard) talk to engine directly; engine issues a **short-lived token** instead of exposing `CF_TOKEN` to the browser.
 **Working assumption (operator declined further questions):** remove `aixodia-dashboard/worker/` (the real middleman) + stale `aixodia-engine/relay/` is handled by the engine-side agent; **KEEP** Workers KV / D1 / Named Tunnel.
@@ -49,18 +49,19 @@
 | 1 | ✅ | clone 3 repo, สำรวจสถาปัตยกรรม, สร้าง `task.md`, push ทั้ง 3 repo | `engine afd4f94` / `AIxodia ad939f9` / `dashboard e9ffba7` |
 | 2 | ✅ | บันทึกคำตอบ operator ลง `task.md` | `dashboard b93148d` |
 | 3 | ✅ | **CP1** — ลบ Worker ออกจากเส้นทาง + tooling (ดูรายการไฟล์ด้านล่าง) | `82da2b8` |
-| 3b | ✅ | ลบ `.github/workflows/deploy.yml` (หยุด CI deploy; token ไม่มี `workflow` scope) + เก็บ build-only เป็น reference + แก้ `task.md` ให้ตรงความจริง | `af933f3` (+ commit นี้) |
-| 4 | ✅ | **CP2** — เขียน `src/api.ts` ใหม่ (เรียก engine ตรง) + ปรับ `App.tsx` / LoginPage / `dashboard.tsx` / CSS (ดูรายการด้านล่าง) | _(this commit → ดู CP3)_ |
-| 5 | ⏳ | **CP3** — อัปเดต docs (`README`/`PRODUCT`/`DESIGN`) + รัน `npm ci && npm test && npm run build` + สรุปผล | — |
+| 3b | ✅ | ลบ `.github/workflows/deploy.yml` (หยุด CI deploy; token ไม่มี `workflow` scope) | `af933f3` |
+| 3c | ✅ | เก็บ build-only เป็น `docs/deploy-build-only.yml.example` + แก้ `task.md` ให้ตรงความจริง | `d1b9efa` |
+| 4 | ✅ | **CP2** — เขียน `src/api.ts` ใหม่ (เรียก engine ตรง) + ปรับ `App.tsx` / LoginPage / `dashboard.tsx` / CSS (ดูรายการด้านล่าง) | `9ab8e7e` |
+| 5 | ✅ | **CP3** — อัปเดต docs (`README`/`PRODUCT`/`DESIGN`) + รัน `npm ci && npm test && npm run build` ผ่าน + สรุปผล | _(this commit = HEAD, ดู `git log -1`)_ |
 
-## Commit SHAs (migration — เติมทุก checkpoint)
+## Commit SHAs (migration — ทุก push สำเร็จ)
 
 - baseline (ก่อนเริ่ม): `b93148d`
 - CP1 (Worker removal): `82da2b8`
 - CP1b (ลบ workflow): `af933f3`
-- CP1c (reference + fix task.md): `d1b9efa`
-- CP2: _(จะกรอกใน CP3)_
-- CP3: _( = HEAD สุดท้าย, ดู `git log -1`)_
+- CP1c (build-only reference + fix task.md): `d1b9efa`
+- CP2 (client คุย engine ตรง): `9ab8e7e`
+- CP3 (docs + verify): _( = HEAD สุดท้าย, ดู `git log -1`)_
 
 ## CP2 — ไฟล์ที่เปลี่ยน (client คุย engine ตรง)
 
@@ -70,7 +71,7 @@
 - **`src/components.tsx`** `LoginPage`: เปลี่ยนจากปุ่ม OAuth เป็นฟอร์ม paste GitHub PAT (`type=password`, ไม่เก็บ) + ข้อความอธิบายสั้นๆ ว่าใช้ตรวจตัวตนครั้งเดียวกับ engine แล้วได้ short-lived token แทน; props เป็น `onLogin(githubToken)` (ตัด `health`)
 - **`src/styles.css`**: เพิ่ม `.ax-login-form/-label/-input/-note`
 - **`src/dashboard.tsx`**: แก้ข้อความ error `'Unable to reach the dashboard service'` → `'Unable to reach the engine'`
-- ตรวจแล้ว: `npm test` 6/6 ผ่าน, `npm run build` ผ่าน (tsc + vite) — เป็น sanity check ก่อน CP3 จะรัน `npm ci && npm test && npm run build` ใหม่เป็นทางการ
+- ตรวจแล้ว: `npm test` 6/6 ผ่าน, `npm run build` ผ่าน (tsc + vite) — sanity check; CP3 รัน `npm ci && npm test && npm run build` ทางการแล้ว (ดู *Build / test results*)
 
 ## CP1 — ไฟล์ที่เปลี่ยน (ลบ Worker)
 
@@ -82,7 +83,7 @@
   - Git Database API `POST /git/trees` ที่มี entry path `.github/workflows/deploy.yml` → `404` (แต่ path อื่นเช่น `scratch-probe.txt` → `200` ยืนยันว่าเป็น path-based block)
   - `gh auth refresh -s workflow` → ต้อง device flow ผ่าน browser (one-time code + login) ทำใน sandbox ไม่ได้; ไม่มี token อื่น (env/hosts.yml/credential helper ไม่มี `workflow` scoped token)
   - **เฉพาะการ DELETE workflow file ที่ `git push` อนุญาต** → จึงลบ `deploy.yml` เดิม (ที่รัน `wrangler deploy` + D1/OAuth secrets) ออก เพื่อให้ `wrangler deploy` หมดไปจากเส้นทางและหยุด CI deploy ที่ trigger เองตอน push (commit `af933f3`, push สำเร็จ; ก่อนหน้านั้น push `82da2b8` ไป trigger workflow เก่า → **failed** ไม่มีการ deploy สำเร็จ)
-- **เพิ่ม:** `.env.example` (อธิบาย `VITE_ENGINE_URL`), `src/client-core.js` + `src/client-core.d.ts` (pure helpers ที่ test ได้), `test/client-core.test.js` (แทนที่ worker tests ด้วยชุดทดสอบใหม่), **`docs/deploy-build-only.yml.example`** = เนื้อหา workflow build-only ที่ตั้งใจไว้ (npm ci/test/build + คอมเมนต์อธิบาย) เก็บไว้เป็น reference ที่ path ไม่ใช่ workflow → push ได้ปกติ; พร้อมคอมเมนต์อธิบายว่าต้องใช้ token ที่มี `workflow` scope copy ไป `.github/workflows/deploy.yml` เพื่อ激活อีกครั้ง
+- **เพิ่ม:** `.env.example` (อธิบาย `VITE_ENGINE_URL`), `src/client-core.js` + `src/client-core.d.ts` (pure helpers ที่ test ได้), `test/client-core.test.js` (แทนที่ worker tests ด้วยชุดทดสอบใหม่), **`docs/deploy-build-only.yml.example`** = เนื้อหา workflow build-only ที่ตั้งใจไว้ (npm ci/test/build + คอมเมนต์อธิบาย) เก็บไว้เป็น reference ที่ path ไม่ใช่ workflow → push ได้ปกติ; พร้อมคอมเมนต์อธิบายว่าต้องใช้ token ที่มี `workflow` scope copy ไป `.github/workflows/deploy.yml` เพื่อเปิดใช้งานอีกครั้ง
 - **เหตุผลลบ tests เดิม:** ทั้ง 3 ไฟล์พึ่ง `worker/*.js` ซึ่งถูกลบ — ไม่ใช่ "ลบเพื่อให้ผ่าน" แต่แทนที่ด้วย `test/client-core.test.js` ที่ทดสอบ pure logic ของ client ใหม่
 
 ## Remaining / work ค้าง (สำคัญ)
@@ -97,7 +98,17 @@
 
 - CP1 sanity: `npm test` 6/6 ผ่าน, `npm run build` ผ่าน (หลัง `npm install` sync lock)
 - CP2 sanity: `npm test` 6/6 ผ่าน, `npm run build` ผ่าน (tsc --noEmit + vite build)
-- CP3 (ทางการ): จะรัน `npm ci && npm test && npm run build` แล้วบันทึกผล/error ตรงนี้โดยไม่ปิดบัง
+- **CP3 ทางการ:** `npm ci && npm test && npm run build` → **ผ่านทั้งหมด (exit 0)**
+  - `npm ci`: `added 72 packages`, `found 0 vulnerabilities` (lock ไม่มี wrangler)
+  - `npm test`: `node --test` → `# tests 6 / # pass 6 / # fail 0` (`test/client-core.test.js`)
+  - `npm run build`: `tsc --noEmit && vite build` → `✓ 1581 modules transformed`, `✓ built in 1.49s`, output `dist/index.html` + `dist/assets/*` (static, ไม่มี wrangler)
+- ไม่มี error ที่ต้องปิดบัง; ไม่ได้ลบ test เพื่อให้ผ่าน — แทนที่ worker tests ด้วยชุดทดสอบ client ใหม่จริง
+
+## CP3 — ไฟล์ที่เปลี่ยน (docs)
+
+- `README.md`: อธิบายสถาปัตยกรรม SPA→engine ตรง (ไม่มี Worker), flow PAT→short-lived token, `sessionStorage` + `Authorization: Bearer`, **`VITE_ENGINE_URL`**, ฝั่ง engine ต้องตั้ง **`ALLOWED_GITHUB_USERS` + `ALLOWED_ORIGINS`**, วิธี dev (direct `127.0.0.1:8787` หรือ `/engine` Vite proxy), **trade-off PAT paste vs OAuth redirect (รอ operator อนุมัติ / อาจเป็น OAuth PKCE)**, CI note (ไม่มี active workflow + reference file), known gap device/MCP
+- `PRODUCT.md`: อัปเดต Product Purpose / Capabilities / Principles ให้ตรง PAT+short-lived token; ตัด "preserve /sso/github + Cloudflare session"; บันทึก trade-off + device gap; คง Brand Commitments
+- `DESIGN.md`: เปลี่ยน "focused GitHub sign-in panel" → PAT form; Interaction ตัด "Preserve GitHub OAuth and Cloudflare-backed sessions" → อธิบาย short-lived token + PKCE trade-off; คง Color/Typography/Composition/a11y
 
 ## Next steps สำหรับ AI ที่รับช่วง
 
