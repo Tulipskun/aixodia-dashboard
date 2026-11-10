@@ -76,32 +76,17 @@ export function normalizeDevices(data: unknown): DevicesResponse
 export function normalizeDeviceTools(data: unknown): DeviceToolsResponse
 export function normalizeDeviceAction(data: unknown, id: string, tool: string): DeviceActionResult
 
-// ---------------------------------------------------------------- GitHub Device Flow
-export const GITHUB_DEVICE_CODE_URL: string
-export const GITHUB_DEVICE_TOKEN_URL: string
-export const DEVICE_FLOW_SCOPE: string
-export function parseOAuth(text: string): Record<string, unknown>
-export function readableGitHubError(error?: string, description?: string): string
-export interface DeviceFlowError extends Error { code: string }
-export function deviceFlowError(code: string, message: string): DeviceFlowError
-export interface DeviceCodeInfo {
-  deviceCode: string
-  userCode: string
-  verificationUri: string
-  expiresIn: number
-  interval: number
-}
-export function requestDeviceCode(fetchFn: typeof fetch, clientId: string, scope?: string): Promise<DeviceCodeInfo>
-export interface PollDeviceFlowOptions {
-  interval?: number
-  expiresIn?: number
-  signal?: AbortSignal
-  now?: () => number
-  wait?: (ms: number, signal?: AbortSignal) => Promise<void>
-}
-export function pollDeviceFlow(
-  fetchFn: typeof fetch,
-  clientId: string,
-  deviceCode: string,
-  options?: PollDeviceFlowOptions,
+// ---------------------------------------------------------------- GitHub Authorization Code + PKCE
+export const GITHUB_AUTHORIZATION_URL: string
+export function base64UrlEncode(bytes: Uint8Array): string
+export function createPkceS256Challenge(
+  verifier: string,
+  subtle?: Pick<SubtleCrypto, 'digest'> | null,
 ): Promise<string>
+export interface GitHubAuthorizationUrlInput {
+  clientId: string
+  redirectUri: string
+  state: string
+  challenge: string
+}
+export function buildGitHubAuthorizationUrl(input: GitHubAuthorizationUrlInput): string
