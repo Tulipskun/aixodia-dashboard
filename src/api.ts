@@ -19,9 +19,7 @@ import {
   normalizeDeviceAction,
   normalizeDevices,
   normalizeDeviceTools,
-  pollDeviceFlow,
   refreshEngineSession,
-  requestDeviceCode,
   resolveEngineUrl,
   sessionFromStored,
 } from './client-core.js'
