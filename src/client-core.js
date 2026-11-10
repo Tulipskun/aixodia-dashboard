@@ -286,7 +286,7 @@ export const GITHUB_AUTHORIZATION_URL = 'https://github.com/login/oauth/authoriz
 export function base64UrlEncode(bytes) {
   let binary = ''
   for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '')
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/g, '')
 }
 
 /** Create the S256 challenge for a PKCE verifier. */
