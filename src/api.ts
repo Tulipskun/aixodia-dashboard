@@ -11,6 +11,9 @@ import type {
   Session,
 } from './types'
 import {
+  base64UrlEncode,
+  buildGitHubAuthorizationUrl,
+  createPkceS256Challenge,
   bearerValue,
   DEVICE_PATHS,
   engineCall,
@@ -129,29 +132,21 @@ export function getSession(): Session {
 
 const OAUTH_PENDING_KEY = 'aixodia.github-oauth.pending.v1'
 
-function base64Url(bytes: Uint8Array): string {
-  let binary = ''
-  bytes.forEach(byte => { binary += String.fromCharCode(byte) })
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
-}
-
 /** Start GitHub authorization in the system browser with PKCE S256. */
 export async function beginGitHubOAuth(): Promise<void> {
-  const verifier = base64Url(crypto.getRandomValues(new Uint8Array(32)))
-  const state = base64Url(crypto.getRandomValues(new Uint8Array(32)))
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))
-  const challenge = base64Url(new Uint8Array(digest))
+  const verifier = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)))
+  const state = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)))
+  const challenge = await createPkceS256Challenge(verifier)
   sessionStorage.setItem(OAUTH_PENDING_KEY, JSON.stringify({
     verifier, state, redirectUri: GITHUB_REDIRECT_URI,
   }))
-  const authorize = new URL('https://github.com/login/oauth/authorize')
-  authorize.searchParams.set('client_id', GITHUB_CLIENT_ID)
-  authorize.searchParams.set('redirect_uri', GITHUB_REDIRECT_URI)
-  authorize.searchParams.set('scope', 'read:user')
-  authorize.searchParams.set('state', state)
-  authorize.searchParams.set('code_challenge', challenge)
-  authorize.searchParams.set('code_challenge_method', 'S256')
-  window.location.assign(authorize.toString())
+  const authorize = buildGitHubAuthorizationUrl({
+    clientId: GITHUB_CLIENT_ID,
+    redirectUri: GITHUB_REDIRECT_URI,
+    state,
+    challenge,
+  })
+  window.location.assign(authorize)
 }
 
 /** Validate state and exchange the authorization code for Engine credentials. */
