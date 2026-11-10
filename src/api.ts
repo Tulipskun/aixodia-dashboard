@@ -19,6 +19,8 @@ import {
   normalizeDeviceAction,
   normalizeDevices,
   normalizeDeviceTools,
+  pollDeviceFlow,
+  requestDeviceCode,
   resolveEngineUrl,
   sessionFromStored,
 } from './client-core.js'
@@ -31,6 +33,12 @@ import type { StoredSession } from './client-core.js'
 // local-dev options (direct 127.0.0.1:8787 or the /engine Vite proxy); the
 // engine answers CORS itself per ALLOWED_ORIGINS.
 const ENGINE_URL = resolveEngineUrl(import.meta.env.VITE_ENGINE_URL)
+
+// Optional second sign-in method: GitHub Device Flow. Set VITE_GITHUB_CLIENT_ID
+// to an OAuth app's client id (with device flow enabled) to show it in the UI.
+// The OAuth app has no client secret — device flow is public-client safe.
+const GITHUB_CLIENT_ID: string =
+  (import.meta.env.VITE_GITHUB_CLIENT_ID as string | undefined)?.trim() ?? ''
 
 // The engine-issued short-lived token lives in sessionStorage (per-tab, cleared
 // on tab close) — NEVER localStorage, and NEVER the user's GitHub PAT.
@@ -156,6 +164,44 @@ export async function loginWithGitHubToken(githubToken: string): Promise<Session
 /** Clear the short-lived token (there is no server-side session to revoke). */
 export function logout(): void {
   clearStored()
+}
+
+/** True when a GitHub OAuth app client id was provided at build time. */
+export function deviceFlowAvailable(): boolean {
+  return GITHUB_CLIENT_ID.length > 0
+}
+
+/** The two things the UI must show while the user authorizes in GitHub. */
+export interface DeviceCodePrompt {
+  userCode: string
+  verificationUri: string
+}
+
+/**
+ * Sign in with the GitHub Device Flow: request a device code, surface the
+ * user_code + verification_uri via onCode, poll until GitHub grants an OAuth
+ * access token, then exchange that token with the engine for the SAME
+ * short-lived session token the PAT path uses. The OAuth access token is never
+ * stored in the browser.
+ */
+export async function loginWithDeviceFlow(
+  onCode: (info: DeviceCodePrompt) => void,
+  signal?: AbortSignal,
+): Promise<Session> {
+  if (!GITHUB_CLIENT_ID) {
+    throw new ApiError(0, {
+      error: 'GitHub Device Flow is not configured. Set VITE_GITHUB_CLIENT_ID at build time.',
+      code: 'DEVICE_FLOW_NOT_CONFIGURED',
+    })
+  }
+  const info = await requestDeviceCode(fetch, GITHUB_CLIENT_ID)
+  onCode({ userCode: info.userCode, verificationUri: info.verificationUri })
+  const accessToken = await pollDeviceFlow(fetch, GITHUB_CLIENT_ID, info.deviceCode, {
+    interval: info.interval,
+    expiresIn: info.expiresIn,
+    signal,
+  })
+  return loginWithGitHubToken(accessToken)
 }
 
 // ---------------------------------------------------------------- transport

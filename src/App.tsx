@@ -7,6 +7,8 @@ import { Boot, LoginPage } from './components'
 
 type Phase = 'boot' | 'login' | 'home'
 type View = 'home' | 'chat' | 'device'
+type LoginMethod = 'pat' | 'device'
+type DeviceCodeDisplay = { userCode: string; verificationUri: string }
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>('boot')
@@ -15,9 +17,12 @@ export default function App() {
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
   const [loginBusy, setLoginBusy] = useState(false)
   const [loginError, setLoginError] = useState<string | null>(null)
+  const [loginMethod, setLoginMethod] = useState<LoginMethod>('pat')
+  const [deviceCodeInfo, setDeviceCodeInfo] = useState<DeviceCodeDisplay | null>(null)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false)
   const accountMenuRef = useRef<HTMLDivElement>(null)
+  const deviceFlowAbort = useRef<AbortController | null>(null)
 
   useEffect(() => {
     // A 401 from any engine route means the short-lived token is invalid or
@@ -97,12 +102,58 @@ export default function App() {
     setPhase('login')
   }
 
+  const changeLoginMethod = (next: LoginMethod) => {
+    if (next === loginMethod) return
+    setLoginMethod(next)
+    setDeviceCodeInfo(null)
+    setLoginError(null)
+  }
+
+  const handleCancelDeviceFlow = () => {
+    deviceFlowAbort.current?.abort()
+    deviceFlowAbort.current = null
+    setDeviceCodeInfo(null)
+    setLoginBusy(false)
+    setLoginError(null)
+  }
+
+  const handleDeviceFlow = async () => {
+    setLoginBusy(true)
+    setLoginError(null)
+    setDeviceCodeInfo(null)
+    const controller = new AbortController()
+    deviceFlowAbort.current = controller
+    try {
+      const next = await api.loginWithDeviceFlow(
+        info => setDeviceCodeInfo({ userCode: info.userCode, verificationUri: info.verificationUri }),
+        controller.signal,
+      )
+      setSession(next)
+      setPhase(next.authenticated ? 'home' : 'login')
+    } catch (error) {
+      const code = (error as { code?: string } | null)?.code
+      setDeviceCodeInfo(null)
+      if (code !== 'DEVICE_FLOW_CANCELLED') {
+        setLoginError(error instanceof Error ? error.message : 'GitHub sign-in failed.')
+      }
+    } finally {
+      setLoginBusy(false)
+      deviceFlowAbort.current = null
+    }
+  }
+
   if (phase === 'boot') return <Boot label="Checking your session…" />
 
   if (phase === 'login') {
     return (
       <LoginPage
         onLogin={githubToken => void handleLogin(githubToken)}
+        onStartDeviceFlow={() => void handleDeviceFlow()}
+        onCancelDeviceFlow={handleCancelDeviceFlow}
+        onMethodChange={changeLoginMethod}
+        method={loginMethod}
+        deviceFlowAvailable={api.deviceFlowAvailable()}
+        deviceCodeInfo={deviceCodeInfo}
         busy={loginBusy}
         error={loginError}
       />
