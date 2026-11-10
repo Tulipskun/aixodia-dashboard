@@ -124,3 +124,9 @@ cd /workspace/aixodia-work/aixodia-dashboard
 git status --short --branch
 git add -A && git commit -m "task: <step>" && git push origin main
 ```
+
+## Cross-repo checkpoint (synced)
+
+- `aixodia-engine`: CORS + `POST /v1/auth/token` + `client_guard` (`3a264a6`, `dff576e`), stale `relay/` removed (this batch). `cargo check --ignore-rust-version` still running in sandbox (rustc 1.93 < sysinfo/wreq MSRV; deploy box is 1.99.1).
+- `AIxodia`: docs note about the operator-approved short-lived token; Kotlin code still uses `CF_TOKEN` directly (migration pending).
+- **Pending for the next AI:** device/MCP gateway (Worker service binding removed, functions throw `MCP_GATEWAY_NOT_MIGRATED`), OAuth-PKCE vs PAT-paste decision, and setting `ALLOWED_GITHUB_USERS` / `ALLOWED_ORIGINS` / `VITE_ENGINE_URL` in the real deployment.
