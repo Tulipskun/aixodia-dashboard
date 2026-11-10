@@ -191,6 +191,11 @@ export async function completeGitHubOAuth(code: string, state: string): Promise<
   return getSession()
 }
 
+/** Clear the local Engine access and refresh credentials. */
+export function logout(): void {
+  clearStored()
+}
+
 // ---------------------------------------------------------------- token refresh
 const ACCESS_REFRESH_SKEW_MS = 120_000
 let refreshInFlight: Promise<StoredSession> | null = null
