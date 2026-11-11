@@ -92,9 +92,12 @@ jobs:
           asset=$(grep -oE 'src="[^"]+\.js"' /tmp/pages-index.html | head -1 | sed -E 's/^src="([^"]+)"$/\1/' | sed 's#^\./##')
           test -n "$asset"
           curl --fail --silent --show-error --location --retry 12 --retry-delay 3 --retry-all-errors "https://aixodia-dashboard.pages.dev/$asset" -o /tmp/pages-app.js
-          for marker in 'github.com/login/oauth/authorize' 'code_challenge_method' 'S256' '/v1/auth/github/exchange'; do grep -Fq "$marker" /tmp/pages-app.js || { echo "Missing PKCE marker: $marker"; exit 1; }; done
-          ! grep -Fq 'device_code' /tmp/pages-app.js
-          ! grep -Fq 'Paste a token' /tmp/pages-app.js
+          # Sign-in is Cloudflare Access now: the bundle must talk to Access and
+          # must not carry an OAuth flow or a pasted credential of its own.
+          for marker in 'cdn-cgi/access/login' '/v1/auth/whoami'; do grep -Fq "$marker" /tmp/pages-app.js || { echo "Missing Access marker: $marker"; exit 1; }; done
+          for removed in 'github.com/login/oauth/authorize' 'code_challenge' '/v1/auth/github/exchange' 'device_code' 'Paste a token'; do
+            if grep -Fq "$removed" /tmp/pages-app.js; then echo "Stale marker still in bundle: $removed"; exit 1; fi
+          done
           echo 'Static Pages deployment is verified on pages.dev.'
 
       - name: Attach production domain and remove obsolete dashboard Worker route
@@ -171,17 +174,18 @@ jobs:
               output.write(f'account_id={account_id}\n')
           PY
 
-      - name: Verify production custom domain serves current PKCE bundle
+      - name: Verify production custom domain serves the Access bundle
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --location --retry 24 --retry-delay 5 --retry-all-errors https://dashboard.aixodia.dpdns.org/ -o /tmp/dashboard-index.html
           asset=$(grep -oE 'src="[^"]+\.js"' /tmp/dashboard-index.html | head -1 | sed -E 's/^src="([^"]+)"$/\1/' | sed 's#^\./##')
           test -n "$asset"
           curl --fail --silent --show-error --location --retry 24 --retry-delay 5 --retry-all-errors "https://dashboard.aixodia.dpdns.org/$asset" -o /tmp/dashboard-app.js
-          for marker in 'github.com/login/oauth/authorize' 'code_challenge_method' 'S256' '/v1/auth/github/exchange'; do grep -Fq "$marker" /tmp/dashboard-app.js || { echo "Missing production PKCE marker: $marker"; exit 1; }; done
-          ! grep -Fq 'device_code' /tmp/dashboard-app.js
-          ! grep -Fq 'Paste a token' /tmp/dashboard-app.js
-          echo 'Production dashboard.aixodia.dpdns.org serves the current PKCE bundle.'
+          for marker in 'cdn-cgi/access/login' '/v1/auth/whoami'; do grep -Fq "$marker" /tmp/dashboard-app.js || { echo "Missing production Access marker: $marker"; exit 1; }; done
+          for removed in 'github.com/login/oauth/authorize' 'code_challenge' '/v1/auth/github/exchange' 'device_code' 'Paste a token'; do
+            if grep -Fq "$removed" /tmp/dashboard-app.js; then echo "Stale marker still served: $removed"; exit 1; fi
+          done
+          echo 'Production dashboard.aixodia.dpdns.org serves the Access bundle.'
 
       - name: Delete unused legacy Dashboard Worker script
         env:
