@@ -1,19 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { webcrypto } from 'node:crypto'
 import {
   DEFAULT_ENGINE_URL,
   resolveEngineUrl,
-  bearerValue,
   isExpired,
   enginePath,
-  sessionFromStored,
   DEVICE_PATHS,
-  base64UrlEncode,
-  createPkceS256Challenge,
-  buildGitHubAuthorizationUrl,
   engineCall,
-  refreshEngineSession,
   normalizeDevice,
   normalizeDevices,
   normalizeDeviceTools,
@@ -60,10 +53,6 @@ test('resolveEngineUrl defaults to the production tunnel and strips trailing sla
   assert.equal(resolveEngineUrl('/engine'), '/engine')
 })
 
-test('bearerValue wraps the short-lived engine token', () => {
-  assert.equal(bearerValue('opaque-token'), 'Bearer opaque-token')
-})
-
 test('isExpired treats past and invalid expiries as expired', () => {
   const now = 1_700_000_000_000
   assert.equal(isExpired(1_700_000_000, now), true) // exactly now -> expired
@@ -80,46 +69,10 @@ test('enginePath maps legacy /api paths to direct engine paths', () => {
   assert.equal(enginePath('/api/engine/v1/sessions'), '/v1/sessions')
   assert.equal(enginePath('/api/engine/v1/runs'), '/v1/runs')
   assert.equal(enginePath('/api/engine/v1/runs/run_x/events'), '/v1/runs/run_x/events')
-  assert.equal(enginePath('/api/auth/token'), '/v1/auth/token')
+  // The engine no longer issues tokens: Cloudflare Access does, so the old
+  // /api/auth/token mapping is gone and the path passes through unchanged.
+  assert.equal(enginePath('/api/auth/token'), '/api/auth/token')
 })
-
-test('sessionFromStored derives authenticated/user/expiresAt from token state', () => {
-  const now = 1_700_000_000_000
-  const stored = { token: 't', expiresAt: 1_700_000_900, user: 'Tulipskun', scope: 'client' }
-  assert.deepEqual(sessionFromStored(stored, now), {
-    authenticated: true,
-    username: 'Tulipskun',
-    expiresAt: new Date(1_700_000_900 * 1000).toISOString(),
-  })
-  assert.deepEqual(sessionFromStored(null, now), {
-    authenticated: false, username: null, expiresAt: null,
-  })
-  assert.deepEqual(sessionFromStored({ ...stored, expiresAt: 1_700_000_000 }, now), {
-    authenticated: false, username: null, expiresAt: null,
-  })
-})
-
-test('sessionFromStored stays authenticated after access expiry while refresh credential is valid', () => {
-  const now = 1_700_000_000_000
-  const stored = {
-    token: 'expired-access',
-    expiresAt: 1_699_999_999,
-    refreshToken: 'long-lived-refresh',
-    refreshExpiresAt: 1_800_000_000,
-    user: 'Tulipskun',
-    scope: 'client',
-  }
-  assert.deepEqual(sessionFromStored(stored, now), {
-    authenticated: true,
-    username: 'Tulipskun',
-    expiresAt: new Date(1_800_000_000 * 1000).toISOString(),
-  })
-  assert.deepEqual(sessionFromStored({ ...stored, refreshExpiresAt: 1_700_000_000 }, now), {
-    authenticated: false, username: null, expiresAt: null,
-  })
-})
-
-// ---------------------------------------------------------------- device paths
 
 test('DEVICE_PATHS point at the real engine endpoints and encode ids', () => {
   assert.equal(DEVICE_PATHS.list, '/v1/devices')
@@ -131,25 +84,23 @@ test('DEVICE_PATHS point at the real engine endpoints and encode ids', () => {
 
 // ---------------------------------------------------------------- engineCall (mock fetch)
 
-test('engineCall sends the Bearer token, method and JSON body and parses the response', async () => {
+test('engineCall relies on the Access cookie: no Authorization header is built here', async () => {
   const fetchFn = createFetch([jsonResponse({ tools: [{ name: 'tap' }] })])
-  const result = await engineCall(fetchFn, 'https://engine.test', DEVICE_PATHS.tools('dev-1'), {
-    token: 'short-lived',
-  })
+  const result = await engineCall(fetchFn, 'https://engine.test', DEVICE_PATHS.tools('dev-1'))
   assert.equal(result.ok, true)
   assert.equal(result.status, 200)
   assert.deepEqual(result.data, { tools: [{ name: 'tap' }] })
   const call = fetchFn.calls[0]
   assert.equal(call.url, 'https://engine.test/v1/devices/dev-1/tools')
   assert.equal(call.init.method, 'GET')
-  assert.equal(call.init.headers['Authorization'], 'Bearer short-lived')
-  assert.equal(call.init.credentials, 'omit')
+  assert.equal(call.init.headers['Authorization'], undefined)
+  // Cloudflare Access authorises from the cookie, so it must be sent.
+  assert.equal(call.init.credentials, 'include')
 })
 
 test('engineCall sends the action body as { tool, arguments } for POST', async () => {
   const fetchFn = createFetch([jsonResponse({ ok: true, tool: 'tap', text: '' })])
   await engineCall(fetchFn, 'https://engine.test', DEVICE_PATHS.action('dev-1'), {
-    token: 'tok',
     method: 'POST',
     body: { tool: 'tap', arguments: { x: 10, y: 20 } },
   })
@@ -169,68 +120,6 @@ test('engineCall returns NETWORK_ERROR on a transport failure', async () => {
 })
 
 
-test('refreshEngineSession posts refresh_token to the public refresh endpoint and validates response', async () => {
-  const fetchFn = createFetch([jsonResponse({
-    token: 'new-access',
-    expires_at: 1_800_000_000,
-    refresh_token: 'long-refresh',
-    refresh_expires_at: 1_900_000_000,
-    user: 'Tulipskun',
-    scope: 'client',
-  })])
-  const result = await refreshEngineSession(fetchFn, 'https://engine.test', 'old-refresh', 1_700_000_000_000)
-  assert.equal(result.ok, true)
-  assert.deepEqual(result.session, {
-    token: 'new-access',
-    expiresAt: 1_800_000_000,
-    refreshToken: 'long-refresh',
-    refreshExpiresAt: 1_900_000_000,
-    user: 'Tulipskun',
-    scope: 'client',
-  })
-  assert.equal(fetchFn.calls[0].url, 'https://engine.test/v1/auth/refresh')
-  assert.equal(fetchFn.calls[0].init.method, 'POST')
-  assert.equal(fetchFn.calls[0].init.credentials, 'omit')
-  assert.deepEqual(JSON.parse(fetchFn.calls[0].init.body), { refresh_token: 'old-refresh' })
-})
-
-test('refreshEngineSession preserves network errors so the stored refresh credential can be retried', async () => {
-  const result = await refreshEngineSession(createFetch([new Error('offline')]), 'https://engine.test', 'old-refresh')
-  assert.equal(result.ok, false)
-  assert.equal(result.status, 0)
-  assert.equal(result.code, 'NETWORK_ERROR')
-})
-
-test('refreshEngineSession distinguishes rejected credentials and transient server failures', async () => {
-  const rejected = await refreshEngineSession(
-    createFetch([jsonResponse({ error: 'refresh token rejected', code: 'REFRESH_TOKEN_REJECTED' }, { ok: false, status: 401 })]),
-    'https://engine.test', 'bad-refresh',
-  )
-  assert.equal(rejected.ok, false)
-  assert.equal(rejected.status, 401)
-  assert.equal(rejected.code, 'REFRESH_TOKEN_REJECTED')
-  const unavailable = await refreshEngineSession(
-    createFetch([jsonResponse({ error: 'warming up' }, { ok: false, status: 503 })]),
-    'https://engine.test', 'valid-refresh',
-  )
-  assert.equal(unavailable.ok, false)
-  assert.equal(unavailable.status, 503)
-})
-
-test('refreshEngineSession rejects incomplete and already-expired credentials', async () => {
-  const incomplete = await refreshEngineSession(
-    createFetch([jsonResponse({ token: 'access', expires_at: 1_800_000_000 })]),
-    'https://engine.test', 'refresh', 1_700_000_000_000,
-  )
-  assert.equal(incomplete.ok, false)
-  assert.equal(incomplete.code, 'INVALID_TOKEN_RESPONSE')
-  const expired = await refreshEngineSession(
-    createFetch([jsonResponse({ token: 'access', expires_at: 1_699_999_999, refresh_token: 'refresh', refresh_expires_at: 1_900_000_000 })]),
-    'https://engine.test', 'refresh', 1_700_000_000_000,
-  )
-  assert.equal(expired.ok, false)
-  assert.equal(expired.code, 'INVALID_TOKEN_RESPONSE')
-})
 test('engineCall surfaces the engine error code and message on a non-2xx', async () => {
   const fetchFn = createFetch([jsonResponse({ error: 'Tool is not allowed', code: 'INVALID_TOOL' }, { ok: false, status: 400 })])
   const result = await engineCall(fetchFn, 'https://engine.test', DEVICE_PATHS.action('dev-1'), { method: 'POST', body: {} })
@@ -340,42 +229,3 @@ test('normalizeDevices/normalizeDeviceTools never throw on null or malformed bod
 
 // ---------------------------------------------------------------- GitHub PKCE
 
-test('base64UrlEncode uses URL-safe alphabet and omits padding', () => {
-  assert.equal(base64UrlEncode(new Uint8Array([0xfb, 0xff, 0xef])), '-__v')
-})
-
-test('createPkceS256Challenge matches the RFC 7636 S256 example', async () => {
-  const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk'
-  assert.equal(
-    await createPkceS256Challenge(verifier, webcrypto.subtle),
-    'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
-  )
-})
-
-test('createPkceS256Challenge rejects malformed verifier and unavailable Web Crypto', async () => {
-  await assert.rejects(() => createPkceS256Challenge('too-short', webcrypto.subtle), /43–128/)
-  await assert.rejects(() => createPkceS256Challenge('x'.repeat(43), null), /Web Crypto/)
-})
-
-test('buildGitHubAuthorizationUrl includes redirect, state and S256 challenge', () => {
-  const value = buildGitHubAuthorizationUrl({
-    clientId: 'Iv1.clientid',
-    redirectUri: 'https://dashboard.example',
-    state: 'state-random',
-    challenge: 'challenge-random',
-  })
-  const url = new URL(value)
-  assert.equal(url.origin + url.pathname, 'https://github.com/login/oauth/authorize')
-  assert.equal(url.searchParams.get('client_id'), 'Iv1.clientid')
-  assert.equal(url.searchParams.get('redirect_uri'), 'https://dashboard.example')
-  assert.equal(url.searchParams.get('scope'), 'read:user')
-  assert.equal(url.searchParams.get('state'), 'state-random')
-  assert.equal(url.searchParams.get('code_challenge'), 'challenge-random')
-  assert.equal(url.searchParams.get('code_challenge_method'), 'S256')
-})
-
-test('buildGitHubAuthorizationUrl rejects incomplete OAuth transactions', () => {
-  assert.throws(() => buildGitHubAuthorizationUrl({
-    clientId: 'Iv1.clientid', redirectUri: 'https://dashboard.example', state: '', challenge: 'challenge',
-  }), /state is required/)
-})

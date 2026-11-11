@@ -1,92 +1,80 @@
-// Type declarations for client-core.js. TypeScript resolves the
-// `./client-core.js` import from api.ts to this file; the runtime
-// implementation lives in client-core.js (bundled by Vite, imported by Node
-// tests), so no allowJs / type-stripping is required in the toolchain.
+// Type declarations for the plain-JS client core. These mirror client-core.js
+// exactly; keep them in sync when the implementation changes.
 
-import type {
-  DeviceActionResult,
-  DevicesResponse,
-  DeviceToolsResponse,
-} from './types'
-
-export interface StoredSession {
-  token: string
-  expiresAt: number
-  refreshToken?: string
-  refreshExpiresAt?: number
-  user: string
-  scope: string
-}
-
-export interface ClientSession {
-  authenticated: boolean
-  username: string | null
-  expiresAt: string | null
-}
-
+/** Default engine origin: the Cloudflare Access-protected hostname. */
 export const DEFAULT_ENGINE_URL: string
+
+/** Resolve a configured engine URL, falling back to the default. */
 export function resolveEngineUrl(value: unknown): string
-export function bearerValue(token: string): string
+
+/** True when a unix-seconds expiry is at/before now, or is not a finite number. */
 export function isExpired(expiresAtSeconds: unknown, nowMs?: number): boolean
+
+/** Map the historical client-facing /api/* paths to the engine's direct paths. */
 export function enginePath(legacyPath: string): string
-export function sessionFromStored(stored: StoredSession | null, nowMs?: number): ClientSession
 
-// ---------------------------------------------------------------- devices
-export interface DevicePaths {
+export const DEVICE_PATHS: {
   list: string
-  tools(id: string): string
-  action(id: string): string
+  tools: (id: string) => string
+  action: (id: string) => string
 }
-export const DEVICE_PATHS: DevicePaths
 
-export interface EngineCallOptions {
-  token?: string
-  method?: string
-  body?: unknown
+export interface EngineCallResult {
+  ok: boolean
+  status: number
+  data: unknown
+  error?: string
+  code?: string
 }
-export type EngineCallResult =
-  | { ok: true; status: number; data: unknown }
-  | { ok: false; status: number; error: string; code: string; data: unknown }
+
+/**
+ * One engine call. Requests carry the browser's Cloudflare Access cookie, so
+ * no Authorization header is built here.
+ */
 export function engineCall(
   fetchFn: typeof fetch,
   baseUrl: string,
   path: string,
-  options?: EngineCallOptions,
+  options?: { method?: string; body?: unknown },
 ): Promise<EngineCallResult>
-export interface RefreshedEngineSession {
-  token: string
-  expiresAt: number
-  refreshToken: string
-  refreshExpiresAt: number
-  user: string
-  scope: string
-}
-export type RefreshEngineSessionResult =
-  | { ok: true; status: number; session: RefreshedEngineSession }
-  | { ok: false; status: number; error: string; code: string; data: unknown }
-export function refreshEngineSession(
-  fetchFn: typeof fetch,
-  baseUrl: string,
-  refreshToken: string,
-  nowMs?: number,
-): Promise<RefreshEngineSessionResult>
 
-export function normalizeDevice(raw: unknown): DevicesResponse['items'][number]
-export function normalizeDevices(data: unknown): DevicesResponse
-export function normalizeDeviceTools(data: unknown): DeviceToolsResponse
-export function normalizeDeviceAction(data: unknown, id: string, tool: string): DeviceActionResult
-
-// ---------------------------------------------------------------- GitHub Authorization Code + PKCE
-export const GITHUB_AUTHORIZATION_URL: string
-export function base64UrlEncode(bytes: Uint8Array): string
-export function createPkceS256Challenge(
-  verifier: string,
-  subtle?: Pick<SubtleCrypto, 'digest'> | null,
-): Promise<string>
-export interface GitHubAuthorizationUrlInput {
-  clientId: string
-  redirectUri: string
-  state: string
-  challenge: string
+export interface ClientDevice {
+  id: string
+  name: string
+  host: string
+  subtitle?: string
+  tag?: string
+  accent?: string
+  status: {
+    online: boolean
+    latencyMs: number | null
+    checkedAt: string
+    reason: string | null
+    version: string | null
+  }
 }
-export function buildGitHubAuthorizationUrl(input: GitHubAuthorizationUrlInput): string
+
+export interface DevicesResult {
+  items: ClientDevice[]
+  checkedAt: string
+  ephemeral: boolean
+  note: string | null
+}
+
+export function normalizeDevice(raw: unknown): ClientDevice
+export function normalizeDevices(data: unknown): DevicesResult
+export function normalizeDeviceTools(data: unknown): {
+  tools: { name: string; description?: string; inputSchema?: Record<string, unknown> }[]
+}
+export function normalizeDeviceAction(
+  data: unknown,
+  id: string,
+  tool: string,
+): {
+  ok: boolean
+  device: string
+  tool: string
+  text: string
+  screenshot: { mimeType: string; data: string } | null
+  at: string
+}

@@ -11,60 +11,31 @@ import type {
   Session,
 } from './types'
 import {
-  base64UrlEncode,
-  buildGitHubAuthorizationUrl,
-  createPkceS256Challenge,
-  bearerValue,
   DEVICE_PATHS,
   engineCall,
   enginePath,
-  isExpired,
   normalizeDeviceAction,
   normalizeDevices,
   normalizeDeviceTools,
-  refreshEngineSession,
   resolveEngineUrl,
-  sessionFromStored,
 } from './client-core.js'
-import type { StoredSession } from './client-core.js'
 
 // ---------------------------------------------------------------- config
-// The SPA talks to the AIxodia Engine directly (no Cloudflare Worker). The base
-// URL is baked in at build time from VITE_ENGINE_URL (default
-// https://aixodia.dpdns.org). See .env.example and vite.config.ts for the
+// The SPA talks to the AIxodia Engine directly (no Cloudflare Worker), and that
+// origin sits behind Cloudflare Access. VITE_ENGINE_URL is the Access-protected
+// hostname (default https://aixodia.dpdns.org); the browser's Access cookie is
+// what authorises every call. See .env.example and vite.config.ts for the
 // local-dev options (direct 127.0.0.1:8787 or the /engine Vite proxy); the
 // engine answers CORS itself per ALLOWED_ORIGINS.
 const ENGINE_URL = resolveEngineUrl(import.meta.env.VITE_ENGINE_URL)
-
-// GitHub Authorization Code + PKCE. The Engine performs the token exchange;
-// its OAuth client secret is never shipped to this browser.
-const GITHUB_CLIENT_ID: string =
-  (import.meta.env.VITE_GITHUB_CLIENT_ID as string | undefined)?.trim() || 'Ov23lieKSrKCRs5YKwdO'
-// Must match the exact Authorization callback URL registered on the GitHub
-// OAuth App: <origin>/sso/github/callback (the SPA fallback serves App.tsx).
-const GITHUB_REDIRECT_URI = `${window.location.origin}/sso/github/callback`
-
-// Engine-issued access + refresh credentials live in sessionStorage (per-tab,
-// cleared on tab close) — NEVER localStorage, and NEVER the user's GitHub PAT.
-const TOKEN_KEY = 'aixodia.client-session.v1'
 
 // Path constants are derived through enginePath() so the legacy /api/* mapping
 // (/api/health -> /healthz, /api/engine/v1/* -> /v1/*) stays explicit and
 // unit-testable (see test/client-core.test.js).
 const P = {
   health: enginePath('/api/health'),                 // /healthz
-  authToken: enginePath('/api/auth/token'),          // /v1/auth/token
   sessions: enginePath('/api/engine/v1/sessions'),   // /v1/sessions
   runs: enginePath('/api/engine/v1/runs'),           // /v1/runs
-}
-
-interface TokenResponse {
-  token: string
-  expires_at: number
-  refresh_token: string
-  refresh_expires_at: number
-  user: string
-  scope: string
 }
 
 interface HealthzResponse {
@@ -77,7 +48,6 @@ interface HealthzResponse {
   memory_total_bytes?: number | null
   memory_percent?: number | null
 }
-
 // ---------------------------------------------------------------- error
 export class ApiError extends Error {
   readonly status: number
@@ -99,154 +69,109 @@ export function setUnauthorizedHandler(fn: (() => void) | null) {
 }
 
 // ---------------------------------------------------------------- session state
-function readStored(): StoredSession | null {
+//
+// Sign-in is Cloudflare Access, in front of the engine hostname. There is no
+// credential for this SPA to hold: Access runs the GitHub / one-time-PIN login,
+// sets `CF_Authorization` for the engine's own origin, and every request the
+// browser makes to that origin carries it automatically. What is left here is
+// a cached, non-secret profile so the header can show who is signed in without
+// asking the engine on every render.
+const PROFILE_KEY = 'aixodia.access-profile.v1'
+
+interface AccessProfile {
+  username: string
+  expiresAt: number
+}
+
+function readProfile(): AccessProfile | null {
   try {
-    const raw = sessionStorage.getItem(TOKEN_KEY)
+    const raw = localStorage.getItem(PROFILE_KEY)
     if (!raw) return null
-    const parsed = JSON.parse(raw) as StoredSession
-    if (!parsed || typeof parsed.token !== 'string' || typeof parsed.expiresAt !== 'number') return null
-    if (typeof parsed.refreshToken !== 'undefined' && typeof parsed.refreshToken !== 'string') return null
-    if (typeof parsed.refreshExpiresAt !== 'undefined' && typeof parsed.refreshExpiresAt !== 'number') return null
+    const parsed = JSON.parse(raw) as AccessProfile
+    if (!parsed || typeof parsed.username !== 'string' || typeof parsed.expiresAt !== 'number') return null
+    if (parsed.expiresAt * 1000 <= Date.now()) return null
     return parsed
   } catch {
     return null
   }
 }
-function writeStored(s: StoredSession): void {
-  try { sessionStorage.setItem(TOKEN_KEY, JSON.stringify(s)) } catch { /* storage disabled */ }
-}
-function clearStored(): void {
-  try { sessionStorage.removeItem(TOKEN_KEY) } catch { /* storage disabled */ }
-}
-function liveStored(): StoredSession | null {
-  const s = readStored()
-  if (!s) return null
-  const accessValid = !isExpired(s.expiresAt)
-  const refreshValid = Boolean(s.refreshToken) && !isExpired(s.refreshExpiresAt)
-  if (!accessValid && !refreshValid) { clearStored(); return null }
-  return s
+
+function writeProfile(profile: AccessProfile): void {
+  try { localStorage.setItem(PROFILE_KEY, JSON.stringify(profile)) } catch { /* storage disabled */ }
 }
 
-/** Local session state: valid access or refresh credentials count as signed in. */
+function clearProfile(): void {
+  try { localStorage.removeItem(PROFILE_KEY) } catch { /* storage disabled */ }
+}
+
+/** Cached Access identity. `authenticated` is optimistic: the engine is the authority. */
 export function getSession(): Session {
-  return sessionFromStored(liveStored())
-}
-
-const OAUTH_PENDING_KEY = 'aixodia.github-oauth.pending.v1'
-
-/** Start GitHub authorization in the system browser with PKCE S256. */
-export async function beginGitHubOAuth(): Promise<void> {
-  const verifier = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)))
-  const state = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)))
-  const challenge = await createPkceS256Challenge(verifier)
-  sessionStorage.setItem(OAUTH_PENDING_KEY, JSON.stringify({
-    verifier, state, redirectUri: GITHUB_REDIRECT_URI,
-  }))
-  const authorize = buildGitHubAuthorizationUrl({
-    clientId: GITHUB_CLIENT_ID,
-    redirectUri: GITHUB_REDIRECT_URI,
-    state,
-    challenge,
-  })
-  window.location.assign(authorize)
-}
-
-/** Validate state and exchange the authorization code for Engine credentials. */
-export async function completeGitHubOAuth(code: string, state: string): Promise<Session> {
-  let pending: { verifier: string; state: string; redirectUri: string } | null = null
-  try { pending = JSON.parse(sessionStorage.getItem(OAUTH_PENDING_KEY) || 'null') }
-  catch { pending = null }
-  if (!pending?.verifier || pending.state !== state) {
-    throw new ApiError(0, { error: 'GitHub sign-in state did not match. Start again.', code: 'OAUTH_STATE_MISMATCH' })
+  const profile = readProfile()
+  if (!profile) return { authenticated: false, username: null, expiresAt: null }
+  return {
+    authenticated: true,
+    username: profile.username,
+    expiresAt: new Date(profile.expiresAt * 1000).toISOString(),
   }
+}
+
+/**
+ * Ask the engine who the caller is. `Cf-Access-Jwt-Assertion` is added by
+ * Cloudflare, never by this page, so a 200 here proves the Access session is
+ * live. Returns `null` when Access rejects the request.
+ */
+export async function refreshSessionFromEngine(): Promise<Session> {
   let res: Response
   try {
-    res = await fetch(`${ENGINE_URL}/v1/auth/github/exchange`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        code, code_verifier: pending.verifier,
-        redirect_uri: pending.redirectUri, client_id: GITHUB_CLIENT_ID,
-      }),
-      credentials: 'omit',
-      cache: 'no-store',
-    })
+    res = await fetch(`${ENGINE_URL}/v1/auth/whoami`, { credentials: 'include', cache: 'no-store' })
   } catch {
-    throw new ApiError(0, { error: 'Unable to connect to the engine.', code: 'NETWORK_ERROR' })
+    // The engine being unreachable is not the same as being signed out.
+    return getSession()
   }
-  const text = await res.text()
-  let data: unknown = null
-  if (text) { try { data = JSON.parse(text) } catch { data = null } }
-  if (!res.ok) throw new ApiError(res.status, errorBody(data, res.status))
-  const payload = data as Partial<TokenResponse> | null
-  if (!payload || typeof payload.token !== 'string' || typeof payload.expires_at !== 'number'
-      || typeof payload.refresh_token !== 'string' || typeof payload.refresh_expires_at !== 'number') {
-    throw new ApiError(res.status, { error: 'The engine returned an invalid session response.', code: 'INVALID_TOKEN_RESPONSE' })
+  if (res.status === 401 || res.status === 403) {
+    clearProfile()
+    return { authenticated: false, username: null, expiresAt: null }
   }
-  writeStored({
-    token: payload.token, expiresAt: payload.expires_at,
-    refreshToken: payload.refresh_token, refreshExpiresAt: payload.refresh_expires_at,
-    user: typeof payload.user === 'string' ? payload.user : 'signed-in',
-    scope: typeof payload.scope === 'string' ? payload.scope : 'client',
-  })
-  sessionStorage.removeItem(OAUTH_PENDING_KEY)
-  return getSession()
+  if (!res.ok) return getSession()
+  const body = (await res.json().catch(() => null)) as { access_subject?: string | null } | null
+  if (!body) return getSession()
+
+  const username = (body.access_subject || '').trim()
+  if (!username) {
+    clearProfile()
+    return { authenticated: false, username: null, expiresAt: null }
+  }
+  // Access sessions last as long as the application's session_duration; the
+  // exact expiry is inside the JWT, which this page cannot read. Cache for a
+  // day and let the next whoami call correct it.
+  const expiresAt = Math.floor(Date.now() / 1000) + 24 * 60 * 60
+  writeProfile({ username, expiresAt })
+  return {
+    authenticated: true,
+    username,
+    expiresAt: new Date(expiresAt * 1000).toISOString(),
+  }
 }
 
-/** Clear the local Engine access and refresh credentials. */
+/**
+ * Send the browser to the Access login page and come back to this exact URL.
+ * Cloudflare handles the GitHub / one-time-PIN choice; nothing here builds an
+ * OAuth request.
+ */
+export function signIn(): void {
+  clearProfile()
+  const here = `${window.location.origin}${window.location.pathname}${window.location.search}`
+  window.location.assign(`${ENGINE_URL}/cdn-cgi/access/login?redirect_url=${encodeURIComponent(here)}`)
+}
+
+/**
+ * Sign out. Only Cloudflare can end an Access session, so this clears the local
+ * profile and hands the browser to the Access logout endpoint.
+ */
 export function logout(): void {
-  clearStored()
-}
-
-// ---------------------------------------------------------------- token refresh
-const ACCESS_REFRESH_SKEW_MS = 120_000
-let refreshInFlight: Promise<StoredSession> | null = null
-
-/** Renew the short-lived Engine access token without sending the user through GitHub again. */
-async function ensureAccessSession(): Promise<StoredSession | null> {
-  const stored = readStored()
-  if (!stored) return null
-  const now = Date.now()
-  if (!isExpired(stored.expiresAt, now + ACCESS_REFRESH_SKEW_MS)) return stored
-  const refreshCredential = stored.refreshToken
-  if (!refreshCredential || isExpired(stored.refreshExpiresAt, now)) {
-    clearStored()
-    onUnauthorized?.()
-    return null
-  }
-  if (refreshInFlight) return refreshInFlight
-
-  refreshInFlight = (async () => {
-    const result = await refreshEngineSession(fetch, ENGINE_URL, refreshCredential)
-    if (!result.ok) {
-      const error = new ApiError(result.status, { error: result.error, code: result.code })
-      if (result.status === 401) {
-        clearStored()
-        onUnauthorized?.()
-      }
-      throw error
-    }
-    const current = readStored()
-    if (!current || current.refreshToken !== refreshCredential) {
-      // Sign-out or a new login may have happened while the refresh request
-      // was in flight. Never resurrect that previous session.
-      if (current && !isExpired(current.expiresAt)) return current
-      throw new ApiError(0, { error: 'The session changed while it was being refreshed.', code: 'SESSION_CHANGED' })
-    }
-    const next: StoredSession = {
-      ...result.session,
-      user: result.session.user || current.user || stored.user || 'signed-in',
-      scope: result.session.scope || current.scope || stored.scope || 'client',
-    }
-    writeStored(next)
-    return next
-  })()
-
-  try {
-    return await refreshInFlight
-  } finally {
-    refreshInFlight = null
-  }
+  clearProfile()
+  const here = `${window.location.origin}${window.location.pathname}`
+  window.location.assign(`${ENGINE_URL}/cdn-cgi/access/logout?redirect_url=${encodeURIComponent(here)}`)
 }
 
 // ---------------------------------------------------------------- transport
@@ -269,13 +194,11 @@ function errorBody(data: unknown, status: number): ApiErrorBody {
 }
 async function fetchResponse(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = buildHeaders(init)
-  const stored = await ensureAccessSession()
-  if (stored) headers['Authorization'] = bearerValue(stored.token)
   try {
-    // Cross-origin: Authorization header instead of cookies (no same-origin
-    // credentials), the engine answers CORS per ALLOWED_ORIGINS.
+    // Same-origin through the proxy in dev, cross-origin in production: either
+    // way `credentials: 'include'` is what carries the Access cookie.
     return await fetch(`${ENGINE_URL}${path}`, {
-      credentials: 'omit',
+      credentials: 'include',
       cache: 'no-store',
       ...init,
       headers,
@@ -290,7 +213,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let data: unknown = null
   if (text) { try { data = JSON.parse(text) } catch { data = null } }
   if (!res.ok) {
-    if (res.status === 401) onUnauthorized?.()
+    if (res.status === 401 || res.status === 403) onUnauthorized?.()
     throw new ApiError(res.status, errorBody(data, res.status))
   }
   return data as T
@@ -301,7 +224,7 @@ async function requestText(path: string): Promise<string> {
   if (!res.ok) {
     let data: unknown = null
     try { data = JSON.parse(text) } catch { data = null }
-    if (res.status === 401) onUnauthorized?.()
+    if (res.status === 401 || res.status === 403) onUnauthorized?.()
     throw new ApiError(res.status, errorBody(data, res.status))
   }
   return text
@@ -363,15 +286,16 @@ async function deviceCall<T>(
   path: string,
   init: { method?: string; body?: unknown } = {},
 ): Promise<T> {
-  const session = await ensureAccessSession()
   const result = await engineCall(fetch, ENGINE_URL, path, {
-    token: session?.token,
     method: init.method,
     body: init.body,
   })
   if (!result.ok) {
-    if (result.status === 401) onUnauthorized?.()
-    throw new ApiError(result.status, { error: result.error, code: result.code })
+    if (result.status === 401 || result.status === 403) onUnauthorized?.()
+    throw new ApiError(result.status, {
+      error: result.error ?? `HTTP ${result.status}`,
+      code: result.code ?? 'HTTP_ERROR',
+    })
   }
   return result.data as T
 }

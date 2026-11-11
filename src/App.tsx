@@ -18,66 +18,35 @@ export default function App() {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false)
   const accountMenuRef = useRef<HTMLDivElement>(null)
-  const oauthCallbackHandled = useRef(false)
+  const booted = useRef(false)
 
   useEffect(() => {
-    const callback = new URL(window.location.href)
-    const code = callback.searchParams.get('code')
-    const state = callback.searchParams.get('state')
-    const oauthError = callback.searchParams.get('error')
-    if (oauthCallbackHandled.current) return
-
-    // Android uses the same registered HTTPS callback as the dashboard. This
-    // tiny bridge returns the temporary code to the app's verified scheme URI;
-    // the PKCE verifier remains encrypted inside the Android app.
-    if (state?.startsWith('aixodia-android.')) {
-      oauthCallbackHandled.current = true
-      const appCallback = new URL('aixodia://oauth/callback')
-      if (code) appCallback.searchParams.set('code', code)
-      if (state) appCallback.searchParams.set('state', state)
-      if (oauthError) appCallback.searchParams.set('error', oauthError)
-      window.location.replace(appCallback.toString())
-      return
-    }
-    if (!code && !oauthError) return
-    oauthCallbackHandled.current = true
-    window.history.replaceState({}, '', window.location.pathname + window.location.hash)
-    if (oauthError || !code || !state) {
-      setLoginError(oauthError === 'access_denied' ? 'GitHub authorization was cancelled.' : 'GitHub returned an incomplete authorization response.')
-      setPhase('login')
-      return
-    }
-    setLoginBusy(true)
-    api.completeGitHubOAuth(code, state)
+    // Cloudflare Access owns the login. The only local question is whether the
+    // engine still accepts our Access session, and the engine answers that
+    // with /v1/auth/whoami. A network failure keeps the cached profile so a
+    // stopped engine does not look like a signed-out user.
+    if (booted.current) return
+    booted.current = true
+    api.refreshSessionFromEngine()
       .then(next => {
         setSession(next)
         setPhase(next.authenticated ? 'home' : 'login')
       })
-      .catch(error => {
-        setLoginError(error instanceof Error ? error.message : 'GitHub sign-in failed.')
-        setPhase('login')
+      .catch(() => {
+        const cached = api.getSession()
+        setSession(cached)
+        setPhase(cached.authenticated ? 'home' : 'login')
       })
-      .finally(() => setLoginBusy(false))
   }, [])
 
   useEffect(() => {
-    // A 401 means the Engine rejected the access/refresh credentials. Transient
-    // refresh failures never call this handler and keep the user signed in.
+    // A 401/403 from the engine means Cloudflare Access rejected the request, so
+    // the Access session is gone and the login page is the only way forward.
     api.setUnauthorizedHandler(() => {
-      api.logout()
       setSession(null)
       setPhase('login')
     })
     return () => api.setUnauthorizedHandler(null)
-  }, [])
-
-  useEffect(() => {
-    // Session is derived locally from the access/refresh credentials in
-    // sessionStorage. Every engine route except auth issuance/refresh requires
-    // an access token, so do not call /healthz before sign-in.
-    const current = api.getSession()
-    setSession(current)
-    setPhase(current.authenticated ? 'home' : 'login')
   }, [])
 
   useEffect(() => {
@@ -116,22 +85,25 @@ export default function App() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [logoutConfirmOpen])
 
-  const handleStartGitHubOAuth = async () => {
+  const handleSignIn = () => {
     setLoginBusy(true)
     setLoginError(null)
     try {
-      await api.beginGitHubOAuth()
+      // Full-page navigation: Cloudflare Access shows the identity provider
+      // choice and returns to this URL once the session exists.
+      api.signIn()
     } catch (error) {
-      setLoginError(error instanceof Error ? error.message : 'Unable to start GitHub sign-in.')
+      setLoginError(error instanceof Error ? error.message : 'Unable to open the sign-in page.')
       setLoginBusy(false)
     }
   }
 
   const handleLogout = () => {
-    api.logout()
     setSession(null)
     setLogoutConfirmOpen(false)
     setPhase('login')
+    // Cloudflare ends the Access session; the browser then comes back here.
+    api.logout()
   }
 
   if (phase === 'boot') return <Boot label="Checking your session…" />
@@ -139,7 +111,7 @@ export default function App() {
   if (phase === 'login') {
     return (
       <LoginPage
-        onStart={handleStartGitHubOAuth}
+        onStart={handleSignIn}
         busy={loginBusy}
         error={loginError}
       />

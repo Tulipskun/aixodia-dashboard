@@ -16,7 +16,6 @@ import {
   ChevronDown,
   CircleDot,
   Clock,
-  Github,
   Hand,
   Keyboard,
   LayoutGrid,
@@ -285,11 +284,12 @@ export function LoginPage({
           {error && <div className="ax-login-error"><ErrorBanner message={error} /></div>}
           <div className="ax-login-device">
             <p className="ax-login-note">
-              Sign in securely with your GitHub account. Authorization opens in your browser and returns here automatically.
+              Sign in with GitHub or a one-time email PIN. Cloudflare Access handles the
+              sign-in and returns you here automatically.
             </p>
             <button className="ax-github-button" type="button" onClick={onStart} disabled={busy}>
-              {busy ? <Loader2 size={19} className="spin" /> : <Github size={19} />}
-              <span>{busy ? 'Opening GitHub…' : 'Continue with GitHub'}</span>
+              {busy ? <Loader2 size={19} className="spin" /> : <ShieldCheck size={19} />}
+              <span>{busy ? 'Opening sign-in…' : 'Continue to sign in'}</span>
             </button>
           </div>
         </section>

@@ -19,15 +19,6 @@ export function resolveEngineUrl(value) {
 }
 
 /**
- * Build the Bearer credential value for the short-lived engine token.
- * @param {string} token
- * @returns {string}
- */
-export function bearerValue(token) {
-  return `Bearer ${token}`
-}
-
-/**
  * True when a unix-seconds expiry is at/before now, or is not a finite number.
  * @param {unknown} expiresAtSeconds
  * @param {number} [nowMs]
@@ -47,39 +38,15 @@ export function isExpired(expiresAtSeconds, nowMs = Date.now()) {
  */
 export function enginePath(legacyPath) {
   if (legacyPath === '/api/health' || legacyPath === '/api/engine/status') return '/healthz'
-  if (legacyPath === '/api/auth/token') return '/v1/auth/token'
   if (legacyPath.startsWith('/api/engine/')) return legacyPath.slice('/api/engine'.length)
   if (legacyPath === '/api/engine') return '/'
   return legacyPath
 }
 
-/**
- * Build the public Session object from stored access/refresh credential state.
- * @param {StoredSession | null} stored
- * @param {number} [nowMs]
- * @returns {ClientSession}
- */
-export function sessionFromStored(stored, nowMs = Date.now()) {
-  if (!stored) return { authenticated: false, username: null, expiresAt: null }
-  const accessExpired = isExpired(stored.expiresAt, nowMs)
-  const refreshValid = typeof stored.refreshToken === 'string'
-    && stored.refreshToken.length > 0
-    && !isExpired(stored.refreshExpiresAt, nowMs)
-  if (accessExpired && !refreshValid) {
-    return { authenticated: false, username: null, expiresAt: null }
-  }
-  const effectiveExpiry = accessExpired ? stored.refreshExpiresAt : stored.expiresAt
-  return {
-    authenticated: true,
-    username: stored.user || null,
-    expiresAt: new Date(effectiveExpiry * 1000).toISOString(),
-  }
-}
-
 // ---------------------------------------------------------------- devices
 // The engine owns the device/MCP gateway routes directly (no Worker service
 // binding). These paths are the real /v1/* endpoints; api.ts calls them with
-// the same short-lived Bearer token used for every other engine route.
+// the browser's Cloudflare Access cookie, so no token is passed here.
 
 export const DEVICE_PATHS = {
   list: '/v1/devices',
@@ -88,26 +55,25 @@ export const DEVICE_PATHS = {
 }
 
 /**
- * One engine call with the short-lived token. Returns a discriminated result
- * instead of throwing so it stays easy to unit-test with a mock fetch. `api.ts`
- * turns a failure into an ApiError and handles 401 locally.
+ * One engine call. Returns a discriminated result instead of throwing so it
+ * stays easy to unit-test with a mock fetch. `api.ts` turns a failure into an
+ * ApiError and treats 401/403 as an expired Cloudflare Access session.
  *
  * @param {(url: string, init: object) => Promise<{ ok: boolean, status: number, text: () => Promise<string> }>} fetchFn
  * @param {string} baseUrl
  * @param {string} path
- * @param {{ token?: string, method?: string, body?: unknown }} [options]
+ * @param {{ method?: string, body?: unknown }} [options]
  * @returns {Promise<{ ok: boolean, status: number, data: unknown, error?: string, code?: string }>}
  */
 export async function engineCall(fetchFn, baseUrl, path, options = {}) {
   const headers = {}
   if (options.body !== undefined) headers['Content-Type'] = 'application/json'
-  if (options.token) headers['Authorization'] = bearerValue(options.token)
   let res
   try {
     res = await fetchFn(`${baseUrl}${path}`, {
       method: options.method || 'GET',
       headers,
-      credentials: 'omit',
+      credentials: 'include',
       cache: 'no-store',
       ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
     })
@@ -136,57 +102,6 @@ export async function engineCall(fetchFn, baseUrl, path, options = {}) {
     }
   }
   return { ok: true, status: res.status, data }
-}
-
-/**
- * Refresh an Engine access token. This pure helper keeps the HTTP contract
- * injectable so success, expiry, rejection and network failures are testable.
- *
- * @param {typeof fetch} fetchFn
- * @param {string} baseUrl
- * @param {string} refreshToken
- * @param {number} [nowMs]
- */
-export async function refreshEngineSession(fetchFn, baseUrl, refreshToken, nowMs = Date.now()) {
-  const result = await engineCall(fetchFn, baseUrl, '/v1/auth/refresh', {
-    method: 'POST',
-    body: { refresh_token: refreshToken },
-  })
-  if (!result.ok) return result
-  const payload = (result.data && typeof result.data === 'object') ? result.data : {}
-  if (typeof payload.token !== 'string' || !payload.token
-      || typeof payload.expires_at !== 'number' || !Number.isFinite(payload.expires_at)
-      || typeof payload.refresh_token !== 'string' || !payload.refresh_token
-      || typeof payload.refresh_expires_at !== 'number' || !Number.isFinite(payload.refresh_expires_at)) {
-    return {
-      ok: false,
-      status: result.status,
-      code: 'INVALID_TOKEN_RESPONSE',
-      error: 'The engine returned an invalid refresh response.',
-      data: result.data,
-    }
-  }
-  if (isExpired(payload.expires_at, nowMs) || isExpired(payload.refresh_expires_at, nowMs)) {
-    return {
-      ok: false,
-      status: result.status,
-      code: 'INVALID_TOKEN_RESPONSE',
-      error: 'The engine returned expired refresh credentials.',
-      data: result.data,
-    }
-  }
-  return {
-    ok: true,
-    status: result.status,
-    session: {
-      token: payload.token,
-      expiresAt: payload.expires_at,
-      refreshToken: payload.refresh_token,
-      refreshExpiresAt: payload.refresh_expires_at,
-      user: typeof payload.user === 'string' ? payload.user : '',
-      scope: typeof payload.scope === 'string' ? payload.scope : 'client',
-    },
-  }
 }
 
 /** @returns {string} */
@@ -276,44 +191,4 @@ export function normalizeDeviceAction(data, id, tool) {
     screenshot,
     at: str(root.at, new Date().toISOString()),
   }
-}
-
-// ---------------------------------------------------------------- GitHub Authorization Code + PKCE
-
-export const GITHUB_AUTHORIZATION_URL = 'https://github.com/login/oauth/authorize'
-
-/** Encode bytes as unpadded base64url (RFC 4648 §5). */
-export function base64UrlEncode(bytes) {
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/g, '')
-}
-
-/** Create the S256 challenge for a PKCE verifier. */
-export async function createPkceS256Challenge(verifier, subtle = globalThis.crypto?.subtle) {
-  if (typeof verifier !== 'string' || verifier.length < 43 || verifier.length > 128) {
-    throw new TypeError('PKCE verifier must contain 43–128 characters.')
-  }
-  if (!subtle || typeof subtle.digest !== 'function') {
-    throw new Error('Web Crypto SHA-256 is unavailable.')
-  }
-  const digest = await subtle.digest('SHA-256', new TextEncoder().encode(verifier))
-  return base64UrlEncode(new Uint8Array(digest))
-}
-
-/** Build the GitHub authorization URL for a validated PKCE transaction. */
-export function buildGitHubAuthorizationUrl({ clientId, redirectUri, state, challenge }) {
-  for (const [name, value] of Object.entries({ clientId, redirectUri, state, challenge })) {
-    if (typeof value !== 'string' || !value.trim()) {
-      throw new TypeError(`GitHub OAuth ${name} is required.`)
-    }
-  }
-  const url = new URL(GITHUB_AUTHORIZATION_URL)
-  url.searchParams.set('client_id', clientId)
-  url.searchParams.set('redirect_uri', redirectUri)
-  url.searchParams.set('scope', 'read:user')
-  url.searchParams.set('state', state)
-  url.searchParams.set('code_challenge', challenge)
-  url.searchParams.set('code_challenge_method', 'S256')
-  return url.toString()
 }
