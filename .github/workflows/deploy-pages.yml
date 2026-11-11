@@ -26,7 +26,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,25 +48,28 @@ jobs:
           if not token:
               raise SystemExit('CLOUDFLARE_API_TOKEN repository secret is missing.')
           base = 'https://api.cloudflare.com/client/v4'
-          def get(path):
-              req = urllib.request.Request(base + path, headers={'Authorization': 'Bearer ' + token})
-              try:
-                  with urllib.request.urlopen(req, timeout=30) as response:
-                      payload = json.load(response)
-              except urllib.error.HTTPError as error:
-                  raise SystemExit(f'Cloudflare API request failed with HTTP {error.code}; check token permissions.') from None
-              if not payload.get('success'):
-                  raise SystemExit('Cloudflare API rejected the request; check token permissions.')
-              return payload.get('result', [])
-          zones = get('/zones?name=aixodia.dpdns.org&per_page=100')
+          req = urllib.request.Request(base + '/zones?name=aixodia.dpdns.org&per_page=100', headers={'Authorization': 'Bearer ' + token})
+          try:
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  payload = json.load(response)
+          except urllib.error.HTTPError as error:
+              raise SystemExit(f'Cloudflare zone lookup failed with HTTP {error.code}.') from None
+          zones = payload.get('result', []) if payload.get('success') else []
           if len(zones) != 1:
               raise SystemExit(f'Expected one aixodia.dpdns.org zone; found {len(zones)}.')
           account_id = zones[0]['account']['id']
-          projects = get(f'/accounts/{account_id}/pages/projects')
-          exists = any(project.get('name') == 'aixodia-dashboard' for project in projects)
+          req = urllib.request.Request(base + f'/accounts/{account_id}/pages/projects', headers={'Authorization': 'Bearer ' + token})
+          try:
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  projects_payload = json.load(response)
+          except urllib.error.HTTPError as error:
+              raise SystemExit(f'Cloudflare Pages lookup failed with HTTP {error.code}.') from None
+          if not projects_payload.get('success'):
+              raise SystemExit('Cloudflare Pages lookup was rejected.')
+          exists = any(project.get('name') == 'aixodia-dashboard' for project in projects_payload.get('result', []))
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
               output.write(f'account_id={account_id}\nproject_exists={str(exists).lower()}\n')
-          print(f'Cloudflare account and Pages project state verified; project_exists={exists}.')
+          print(f'Cloudflare account verified; Pages project exists={exists}.')
           PY
 
       - name: Create static Pages project
@@ -76,7 +79,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ steps.cloudflare.outputs.account_id }}
         run: npx --yes wrangler@4.160.0 pages project create aixodia-dashboard --production-branch main
 
-      - name: Deploy static Dashboard to Pages preview hostname
+      - name: Deploy static Dashboard to Pages
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ steps.cloudflare.outputs.account_id }}
@@ -84,31 +87,131 @@ jobs:
 
       - name: Verify Pages deployment before custom-domain cutover
         run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 12 --retry-delay 3 --retry-all-errors https://aixodia-dashboard.pages.dev/ -o /tmp/pages-index.html
+          asset=$(grep -oE 'src="[^"]+\.js"' /tmp/pages-index.html | head -1 | sed -E 's/^src="([^"]+)"$/\1/' | sed 's#^\./##')
+          test -n "$asset"
+          curl --fail --silent --show-error --location --retry 12 --retry-delay 3 --retry-all-errors "https://aixodia-dashboard.pages.dev/$asset" -o /tmp/pages-app.js
+          for marker in 'github.com/login/oauth/authorize' 'code_challenge_method' 'S256' '/v1/auth/github/exchange'; do grep -Fq "$marker" /tmp/pages-app.js || { echo "Missing PKCE marker: $marker"; exit 1; }; done
+          ! grep -Fq 'device_code' /tmp/pages-app.js
+          ! grep -Fq 'Paste a token' /tmp/pages-app.js
+          echo 'Static Pages deployment is verified on pages.dev.'
+
+      - name: Attach production domain and remove obsolete dashboard Worker route
+        id: cutover
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
           python3 - <<'PY'
-          import re, time, urllib.request
-          base = 'https://aixodia-dashboard.pages.dev/'
-          required = ['github.com/login/oauth/authorize', 'code_challenge_method', 'S256', '/v1/auth/github/exchange']
-          last_error = None
-          for attempt in range(24):
+          import json, os, urllib.error, urllib.parse, urllib.request
+          token = os.environ['CF_API_TOKEN']
+          base = 'https://api.cloudflare.com/client/v4'
+          def api(method, path, payload=None, optional=False):
+              body = json.dumps(payload).encode() if payload is not None else None
+              req = urllib.request.Request(base + path, data=body, method=method, headers={
+                  'Authorization': 'Bearer ' + token,
+                  'Content-Type': 'application/json',
+              })
               try:
-                  with urllib.request.urlopen(base, timeout=20) as response:
-                      html = response.read().decode()
-                  assets = re.findall(r'(?:src|href)="([^"]+\.js)"', html)
-                  if not assets:
-                      raise RuntimeError('Pages preview HTML has no JavaScript asset.')
-                  url = assets[0] if assets[0].startswith('http') else base + assets[0].lstrip('/')
-                  with urllib.request.urlopen(url, timeout=20) as response:
-                      bundle = response.read().decode()
-                  missing = [marker for marker in required if marker not in bundle]
-                  if missing:
-                      raise RuntimeError('Pages preview is stale; missing markers: ' + ', '.join(missing))
-                  if 'device_code' in bundle or 'Paste a token' in bundle:
-                      raise RuntimeError('Obsolete Device Flow/PAT UI remains in Pages preview.')
-                  print('Static Pages deployment is serving the current PKCE bundle.')
-                  break
-              except Exception as error:
-                  last_error = error
-                  if attempt == 23:
-                      raise SystemExit(f'Pages preview verification failed: {last_error}')
-                  time.sleep(5)
+                  with urllib.request.urlopen(req, timeout=30) as response:
+                      raw = response.read()
+                      return response.status, json.loads(raw) if raw else {}
+              except urllib.error.HTTPError as error:
+                  raw = error.read()
+                  try: detail = json.loads(raw)
+                  except Exception: detail = {}
+                  if optional: return error.code, detail
+                  messages = [item.get('message', '') for item in detail.get('errors', [])]
+                  raise RuntimeError(f'Cloudflare {method} {path} failed HTTP {error.code}: {"; ".join(messages)[:300]}') from None
+          def results(path):
+              status, payload = api('GET', path)
+              if status != 200 or not payload.get('success'):
+                  raise RuntimeError(f'Cloudflare GET {path} was rejected.')
+              return payload.get('result', [])
+          zones = results('/zones?name=aixodia.dpdns.org&per_page=100')
+          if len(zones) != 1: raise SystemExit('Expected exactly one aixodia.dpdns.org zone.')
+          zone_id = zones[0]['id']; account_id = zones[0]['account']['id']
+          project = 'aixodia-dashboard'; domain = 'dashboard.aixodia.dpdns.org'; target = project + '.pages.dev'
+
+          domains_path = f'/accounts/{account_id}/pages/projects/{project}/domains'
+          domains = results(domains_path)
+          if not any(item.get('name') == domain for item in domains):
+              status, payload = api('POST', domains_path, {'name': domain}, optional=True)
+              if status not in (200, 201) or not payload.get('success'):
+                  raise SystemExit(f'Cloudflare Pages domain association failed (HTTP {status}); old Worker route remains untouched.')
+          print('Pages custom-domain association is registered.')
+
+          dns_path = f'/zones/{zone_id}/dns_records?name={urllib.parse.quote(domain)}&per_page=100'
+          records = results(dns_path)
+          if len(records) > 1: raise SystemExit(f'Expected at most one dashboard DNS record; found {len(records)}.')
+          cname = {'type':'CNAME','name':domain,'content':target,'ttl':1,'proxied':True}
+          if not records:
+              status, payload = api('POST', f'/zones/{zone_id}/dns_records', cname)
+          elif records[0].get('type') == 'CNAME' and records[0].get('content') == target:
+              status, payload = 200, {'success':True}
+          elif records[0].get('type') == 'A' and records[0].get('content') == '192.0.2.1':
+              status, payload = api('PUT', f"/zones/{zone_id}/dns_records/{records[0]['id']}", cname)
+          else:
+              raise SystemExit('Dashboard DNS record differs from the known placeholder; refusing to overwrite it.')
+          if status not in (200, 201) or not payload.get('success'):
+              raise SystemExit(f'Could not point dashboard DNS at Pages (HTTP {status}); old Worker route remains untouched.')
+          print(f'Dashboard DNS points to {target}.')
+
+          routes = results(f'/zones/{zone_id}/workers/routes')
+          matches = [route for route in routes if route.get('pattern') == domain + '/*' and route.get('script') == 'aixodia-dashboard']
+          if len(matches) > 1: raise SystemExit(f'Found {len(matches)} duplicate dashboard Worker routes; refusing to delete ambiguously.')
+          if matches:
+              status, payload = api('DELETE', f"/zones/{zone_id}/workers/routes/{matches[0]['id']}")
+              if status not in (200, 202) or not payload.get('success'):
+                  raise SystemExit(f'Could not remove the exact obsolete dashboard Worker route (HTTP {status}).')
+              print('Removed only dashboard.aixodia.dpdns.org/* → aixodia-dashboard.')
+          else:
+              print('The obsolete dashboard Worker route was already absent.')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'account_id={account_id}\n')
+          PY
+
+      - name: Verify production custom domain serves current PKCE bundle
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 24 --retry-delay 5 --retry-all-errors https://dashboard.aixodia.dpdns.org/ -o /tmp/dashboard-index.html
+          asset=$(grep -oE 'src="[^"]+\.js"' /tmp/dashboard-index.html | head -1 | sed -E 's/^src="([^"]+)"$/\1/' | sed 's#^\./##')
+          test -n "$asset"
+          curl --fail --silent --show-error --location --retry 24 --retry-delay 5 --retry-all-errors "https://dashboard.aixodia.dpdns.org/$asset" -o /tmp/dashboard-app.js
+          for marker in 'github.com/login/oauth/authorize' 'code_challenge_method' 'S256' '/v1/auth/github/exchange'; do grep -Fq "$marker" /tmp/dashboard-app.js || { echo "Missing production PKCE marker: $marker"; exit 1; }; done
+          ! grep -Fq 'device_code' /tmp/dashboard-app.js
+          ! grep -Fq 'Paste a token' /tmp/dashboard-app.js
+          echo 'Production dashboard.aixodia.dpdns.org serves the current PKCE bundle.'
+
+      - name: Delete unused legacy Dashboard Worker script
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.error, urllib.request
+          token = os.environ['CF_API_TOKEN']; base = 'https://api.cloudflare.com/client/v4'
+          def get(path):
+              req = urllib.request.Request(base + path, headers={'Authorization':'Bearer '+token})
+              with urllib.request.urlopen(req, timeout=30) as response: return json.load(response).get('result', [])
+          zones = get('/zones?per_page=100')
+          for zone in zones:
+              routes = get(f"/zones/{zone['id']}/workers/routes")
+              if any(route.get('script') == 'aixodia-dashboard' for route in routes):
+                  raise SystemExit(f"Worker script still has a route in zone {zone.get('name')}; refusing to delete it.")
+          accounts = get('/accounts?per_page=100')
+          matches = [account for account in accounts if account.get('id') == os.environ.get('CF_ACCOUNT_ID', '')]
+          if not matches:
+              # The account is resolved from the exact aixodia zone.
+              zones = get('/zones?name=aixodia.dpdns.org&per_page=100')
+              if len(zones) != 1: raise SystemExit('Cannot resolve Cloudflare account for Worker cleanup.')
+              account_id = zones[0]['account']['id']
+          else: account_id = matches[0]['id']
+          req = urllib.request.Request(base + f'/accounts/{account_id}/workers/scripts/aixodia-dashboard', method='DELETE', headers={'Authorization':'Bearer '+token})
+          try:
+              with urllib.request.urlopen(req, timeout=30) as response: payload = json.load(response)
+          except urllib.error.HTTPError as error:
+              if error.code == 404: print('Legacy dashboard Worker script already absent.'); raise SystemExit(0)
+              raise SystemExit(f'Legacy Worker script deletion failed with HTTP {error.code}.') from None
+          if not payload.get('success'): raise SystemExit('Legacy Worker script deletion was rejected.')
+          print('Deleted the unused aixodia-dashboard Worker script. Other Workers were untouched.')
           PY
