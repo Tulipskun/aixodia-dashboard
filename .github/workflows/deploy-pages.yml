@@ -1,0 +1,109 @@
+name: Deploy Dashboard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.*'
+      - 'tsconfig*'
+      - 'README.md'
+      - '.env.example'
+      - '.github/workflows/deploy-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aixodia-dashboard-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - run: npm run build
+
+      - name: Discover the Pages project for the production domain
+        id: cloudflare
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.error, urllib.request
+          token = os.environ.get('CF_API_TOKEN', '')
+          if not token:
+              raise SystemExit('CLOUDFLARE_API_TOKEN repository secret is missing.')
+          base = 'https://api.cloudflare.com/client/v4'
+          def get(path):
+              req = urllib.request.Request(base + path, headers={'Authorization': 'Bearer ' + token})
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as response:
+                      payload = json.load(response)
+              except urllib.error.HTTPError as error:
+                  raise SystemExit(f'Cloudflare API request failed with HTTP {error.code}; check token permissions.') from None
+              if not payload.get('success'):
+                  raise SystemExit('Cloudflare API rejected the request; check token permissions.')
+              return payload.get('result', [])
+          matches = []
+          for account in get('/accounts?per_page=100'):
+              for project in get(f"/accounts/{account['id']}/pages/projects"):
+                  if 'dashboard.aixodia.dpdns.org' in (project.get('domains') or []):
+                      matches.append((account['id'], project['name']))
+          if len(matches) != 1:
+              raise SystemExit(f'Expected exactly one Pages project bound to dashboard.aixodia.dpdns.org; found {len(matches)}.')
+          account_id, project_name = matches[0]
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'account_id={account_id}\nproject_name={project_name}\n')
+          print(f'Found production Pages project: {project_name}.')
+          PY
+
+      - name: Deploy static Dashboard to production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ steps.cloudflare.outputs.account_id }}
+          CF_PROJECT_NAME: ${{ steps.cloudflare.outputs.project_name }}
+        run: npx --yes wrangler@4.160.0 pages deploy dist --project-name "$CF_PROJECT_NAME" --branch main
+
+      - name: Verify production serves the current PKCE bundle
+        run: |
+          python3 - <<'PY'
+          import re, time, urllib.request
+          required = ['github.com/login/oauth/authorize', 'code_challenge_method', 'S256', '/v1/auth/github/exchange']
+          last_error = None
+          for attempt in range(24):
+              try:
+                  with urllib.request.urlopen('https://dashboard.aixodia.dpdns.org/', timeout=20) as response:
+                      html = response.read().decode()
+                  assets = re.findall(r'(?:src|href)="([^"]+\.js)"', html)
+                  if not assets:
+                      raise RuntimeError('Production HTML has no JavaScript asset.')
+                  url = assets[0] if assets[0].startswith('http') else 'https://dashboard.aixodia.dpdns.org/' + assets[0].lstrip('/')
+                  with urllib.request.urlopen(url, timeout=20) as response:
+                      bundle = response.read().decode()
+                  missing = [marker for marker in required if marker not in bundle]
+                  if missing:
+                      raise RuntimeError('Production bundle is stale; missing markers: ' + ', '.join(missing))
+                  if 'device_code' in bundle or 'Paste a token' in bundle:
+                      raise RuntimeError('Obsolete Device Flow/PAT UI remains in production.')
+                  print('Production Dashboard serves the current GitHub PKCE bundle.')
+                  break
+              except Exception as error:
+                  last_error = error
+                  if attempt == 23:
+                      raise SystemExit(f'Production verification failed: {last_error}')
+                  time.sleep(5)
+          PY
