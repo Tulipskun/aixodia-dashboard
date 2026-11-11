@@ -40,7 +40,9 @@ const ENGINE_URL = resolveEngineUrl(import.meta.env.VITE_ENGINE_URL)
 // its OAuth client secret is never shipped to this browser.
 const GITHUB_CLIENT_ID: string =
   (import.meta.env.VITE_GITHUB_CLIENT_ID as string | undefined)?.trim() || 'Ov23lieKSrKCRs5YKwdO'
-const GITHUB_REDIRECT_URI = window.location.origin
+// Must match the exact Authorization callback URL registered on the GitHub
+// OAuth App: <origin>/sso/github/callback (the SPA fallback serves App.tsx).
+const GITHUB_REDIRECT_URI = `${window.location.origin}/sso/github/callback`
 
 // Engine-issued access + refresh credentials live in sessionStorage (per-tab,
 // cleared on tab close) — NEVER localStorage, and NEVER the user's GitHub PAT.
