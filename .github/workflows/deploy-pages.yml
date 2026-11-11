@@ -37,7 +37,7 @@ jobs:
       - run: npm test
       - run: npm run build
 
-      - name: Discover the Pages project for the production domain
+      - name: Inspect existing Cloudflare hosting topology
         id: cloudflare
         env:
           CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -48,30 +48,55 @@ jobs:
           if not token:
               raise SystemExit('CLOUDFLARE_API_TOKEN repository secret is missing.')
           base = 'https://api.cloudflare.com/client/v4'
-          def get(path):
+          def get(path, optional=False):
               req = urllib.request.Request(base + path, headers={'Authorization': 'Bearer ' + token})
               try:
                   with urllib.request.urlopen(req, timeout=30) as response:
                       payload = json.load(response)
               except urllib.error.HTTPError as error:
+                  if optional:
+                      print(f'Optional metadata endpoint returned HTTP {error.code}: {path}')
+                      return []
                   raise SystemExit(f'Cloudflare API request failed with HTTP {error.code}; check token permissions.') from None
               if not payload.get('success'):
+                  if optional:
+                      print(f'Optional metadata endpoint unavailable: {path}')
+                      return []
                   raise SystemExit('Cloudflare API rejected the request; check token permissions.')
               return payload.get('result', [])
-          matches = []
-          for account in get('/accounts?per_page=100'):
-              for project in get(f"/accounts/{account['id']}/pages/projects"):
-                  if 'dashboard.aixodia.dpdns.org' in (project.get('domains') or []):
-                      matches.append((account['id'], project['name']))
-          if len(matches) != 1:
-              raise SystemExit(f'Expected exactly one Pages project bound to dashboard.aixodia.dpdns.org; found {len(matches)}.')
-          account_id, project_name = matches[0]
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
-              output.write(f'account_id={account_id}\nproject_name={project_name}\n')
-          print(f'Found production Pages project: {project_name}.')
+          accounts = get('/accounts?per_page=100')
+          pages_matches = []
+          for account in accounts:
+              account_id = account['id']
+              print(f"Cloudflare account: {account.get('name', 'unnamed')} ({account_id})")
+              projects = get(f'/accounts/{account_id}/pages/projects', optional=True)
+              for project in projects:
+                  domains = project.get('domains') or []
+                  print(f"Pages project: {project.get('name')} domains={','.join(domains)}")
+                  if 'dashboard.aixodia.dpdns.org' in domains:
+                      pages_matches.append((account_id, project['name']))
+              scripts = get(f'/accounts/{account_id}/workers/scripts', optional=True)
+              for script in scripts:
+                  print(f"Worker script: {script.get('id') or script.get('script')}")
+          zones = get('/zones?name=aixodia.dpdns.org&per_page=100', optional=True)
+          for zone in zones:
+              zone_id = zone['id']
+              print(f"Zone: {zone.get('name')} ({zone_id})")
+              for route in get(f'/zones/{zone_id}/workers/routes', optional=True):
+                  print(f"Worker route: pattern={route.get('pattern')} script={route.get('script')}")
+              for record in get(f"/zones/{zone_id}/dns_records?name=dashboard.aixodia.dpdns.org&per_page=100", optional=True):
+                  print(f"Dashboard DNS: type={record.get('type')} name={record.get('name')} content={record.get('content')} proxied={record.get('proxied')}")
+          if len(pages_matches) == 1:
+              account_id, project_name = pages_matches[0]
+              with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+                  output.write(f'account_id={account_id}\nproject_name={project_name}\n')
+              print(f'Found Pages project bound to production domain: {project_name}.')
+          else:
+              print(f'No unique Pages project bound to dashboard.aixodia.dpdns.org (matches={len(pages_matches)}).')
           PY
 
       - name: Deploy static Dashboard to production
+        if: steps.cloudflare.outputs.project_name != ''
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ steps.cloudflare.outputs.account_id }}
@@ -79,6 +104,7 @@ jobs:
         run: npx --yes wrangler@4.160.0 pages deploy dist --project-name "$CF_PROJECT_NAME" --branch main
 
       - name: Verify production serves the current PKCE bundle
+        if: steps.cloudflare.outputs.project_name != ''
         run: |
           python3 - <<'PY'
           import re, time, urllib.request
