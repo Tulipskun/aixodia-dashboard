@@ -103,6 +103,14 @@ async function rateLimit(env, key, limit) {
 export async function deviceCode(env, req) {
   const deviceCode = randomSecret()
   const deviceCodeHash = await sha256Hex(deviceCode)
+  // The app sends the phone model; the user agent is only a fallback, because
+  // "curl/8.14.1" on an approval page tells the approver nothing about which
+  // device is asking.
+  const named = await req
+    .clone()
+    .json()
+    .then((payload) => String(payload?.device_name || '').trim())
+    .catch(() => '')
 
   // The user code must be unique among live codes: a collision would let one
   // person approve someone else's pending sign-in.
@@ -113,7 +121,7 @@ export async function deviceCode(env, req) {
         `INSERT INTO device_codes
            (device_code_hash, user_code, device_name, state, created_at, expires_at, approved_by, token_hash)
          VALUES (?1, ?2, ?3, 'pending', ?4, ?5, NULL, NULL)`,
-      ).bind(deviceCodeHash, userCode, deviceName(req), now(), now() + DEVICE_CODE_TTL).run()
+      ).bind(deviceCodeHash, userCode, named.slice(0, 80) || deviceName(req), now(), now() + DEVICE_CODE_TTL).run()
       return json({
         device_code: deviceCode,
         user_code: userCode,
