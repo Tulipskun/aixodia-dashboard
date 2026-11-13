@@ -1,0 +1,30 @@
+name = "aixodia-auth"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Configuration only — read on nearly every request, written almost never.
+# This is the access pattern KV is for: the allowlist and the Access team are set
+# by an operator and then never touched.
+[[kv_namespaces]]
+binding = "CONFIG"
+id = "b9159aba166f4f5c974250310f4459f7"
+
+# Sessions, in D1 rather than KV.
+#
+# Every sign-in writes a row, every confirm updates one, and every status poll
+# reads one. KV is priced and designed for reads; writes are rare and take up to
+# a minute to become visible everywhere. A session that is confirmed but still
+# reads as pending for a minute is not a cache miss, it is a broken sign-in, so
+# sessions belong in a store that is consistent on write.
+[[d1_databases]]
+binding = "DB"
+database_name = "aixodia"
+database_id = "e8e746ea-691e-43bf-9fe2-c4e4016f29a1"
+
+[vars]
+# Comma-separated. Empty means nobody signs in by email, which is the safe
+# reading of "not configured". The KV key auth/allowed_emails overrides it.
+AUTH_ALLOWED_EMAILS = ""
+
+[observability]
+enabled = true

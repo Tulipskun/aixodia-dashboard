@@ -1,6 +1,33 @@
 # AIxodia Dashboard
 
-A static React/Vite + TypeScript single-page app for the AIxodia console. The browser talks directly to the AIxodia Engine through its Named Tunnel; there is no Cloudflare Worker in the request path. The SPA is published as static files from `dist/`.
+A React/Vite + TypeScript single-page app for the AIxodia console, published as
+static files from `dist/` with Pages Functions alongside.
+
+Two server-side pieces live here, and both are part of this product rather than a
+separate service:
+
+| Path | What it is |
+|---|---|
+| `functions/engine/[[path]].js` | Pages Function proxying `/engine/*` to the service that owns the path |
+| `workers/auth/` | The sign-in Worker: issues and confirms session tokens |
+
+The proxy exists because Cloudflare Access sets its session cookie per host. A
+browser that signed in at one hostname has no credential at another, so the SPA
+reaches both the engine and the sign-in Worker through its own origin.
+
+The sign-in Worker is separate from the engine on purpose. The engine is an agent
+that also exposes device-control routes; when it was the sign-in authority its
+uptime was a login requirement, so stopping it to upgrade logged everyone out.
+Sign-in now answers whether or not the engine is running.
+
+`workers/auth/` deploys separately from the site:
+
+```bash
+npx wrangler deploy --config workers/auth/wrangler.toml
+```
+
+Publishing `dist/` is a separate step from deploying the Worker; a successful
+`npm run build` updates neither.
 
 ## Architecture
 
@@ -23,7 +50,11 @@ AIxodia Engine — https://aixodia.dpdns.org
 
 The browser does not receive the GitHub client secret, a GitHub OAuth access token, or `CF_TOKEN`. It stores only Engine-issued session credentials in `sessionStorage` (per-tab). The OAuth PKCE verifier and state are short-lived and kept in the pending browser session while authorization is in progress.
 
-The old `worker/` directory has been removed. Workers KV, D1 and the Named Tunnel remain in the backend architecture, but browser API calls go directly to the Engine. The Engine owns the device/MCP gateway routes; the device list is read from Workers KV `DEVICE_TUNNELS`.
+The old `worker/` directory was removed and its job is now split by path. Workers KV,
+D1 and the Named Tunnel remain in the backend architecture. The Engine owns the
+device/MCP gateway routes; the device list is read from Workers KV `DEVICE_TUNNELS`.
+Sign-in is served by `workers/auth/`, and `functions/engine/[[path]].js` sends each
+path to whichever of the two owns it.
 
 ## GitHub sign-in
 
@@ -89,6 +120,9 @@ npm test       # Node tests for session refresh, device endpoints and PKCE helpe
 npm run build  # tsc --noEmit && vite build; static output is in dist/
 ```
 
-`npm run build` only type-checks and builds the static bundle. There is no Worker to deploy; do not run `wrangler deploy` or assume a successful build updates the production website. Publishing `dist/` to the configured static host (for example, Cloudflare Pages) is a separate deployment step.
+`npm run build` only type-checks and builds the static bundle; it deploys nothing.
+Two separate deployment steps exist: publishing `dist/` to Cloudflare Pages, and
+`npx wrangler deploy --config workers/auth/wrangler.toml` for the sign-in Worker.
+Neither is implied by a successful build.
 
 This repository currently has no active GitHub Actions workflow. The previous build-only workflow example is retained at `docs/deploy-build-only.yml.example`; enabling a GitHub Actions workflow requires the appropriate `workflow` permission and an explicit deployment configuration.
