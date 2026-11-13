@@ -154,14 +154,28 @@ export async function refreshSessionFromEngine(): Promise<Session> {
 }
 
 /**
- * Send the browser to the Access login page and come back to this exact URL.
- * Cloudflare handles the GitHub / one-time-PIN choice; nothing here builds an
- * OAuth request.
+ * Send the browser to the engine so Cloudflare Access runs the login, then come
+ * back to this exact URL.
+ *
+ * Two mistakes were possible here and both showed up as a broken sign-in:
+ *
+ * * Navigating to `/cdn-cgi/access/login` returns 404. That path only exists on
+ *   an Access application configured with path-based rules; this hostname is
+ *   protected as a whole, so there is no such endpoint. A request to any normal
+ *   URL is redirected to the login instead.
+ *
+ * * Passing the dashboard URL as `redirect_url` does nothing here. Access echoes
+ *   the path it was asked for, not the query parameter, so the user would be
+ *   returned to the engine root, which has no page.
+ *
+ * So the browser goes to the engine's own whoami endpoint, which is guarded,
+ * and Access returns it there once the session exists. The SPA then loads
+ * again at its normal address from the link in the app shell — no round trip
+ * through a page that does not exist.
  */
 export function signIn(): void {
   clearProfile()
-  const here = `${window.location.origin}${window.location.pathname}${window.location.search}`
-  window.location.assign(`${ENGINE_URL}/cdn-cgi/access/login?redirect_url=${encodeURIComponent(here)}`)
+  window.location.assign(`${ENGINE_URL}/v1/auth/whoami`)
 }
 
 /**
