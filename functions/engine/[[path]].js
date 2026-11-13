@@ -21,8 +21,14 @@
 const AUTH = 'https://aixodia-auth.aixodia.workers.dev'
 const ENGINE = 'https://engine.aixodia.dpdns.org'
 
-/** Paths the auth Worker answers. */
-const AUTH_PREFIXES = ['/v1/auth/']
+/**
+ * Paths the auth Worker answers.
+ *
+ * `/auth/*`, not `/v1/auth/*`: the engine already serves `/v1/auth/whoami` and the
+ * GitHub exchange, and two services answering under one prefix made it ambiguous
+ * which one owned a sign-in path. The Worker keeps its own namespace.
+ */
+const AUTH_PREFIXES = ['/auth/']
 /** Paths the engine answers and that this proxy may reach. */
 const ENGINE_PREFIXES = ['/v1/', '/healthz', '/cdn-cgi/']
 
