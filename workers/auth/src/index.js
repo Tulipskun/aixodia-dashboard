@@ -278,6 +278,21 @@ async function verifySignature(assertion, header, teamDomain) {
   }
 }
 
+/**
+ * Who the browser is signed in as, or 401.
+ *
+ * Separate from `/auth/request` because it creates nothing: the console calls this
+ * on load to decide whether to show the app or the sign-in panel, and it has to be
+ * answerable without the engine and without writing a session just to ask.
+ */
+async function identity(env, req) {
+  const found = await accessIdentity(env, req)
+  if (!found.email) {
+    return json({ error: 'unauthorized', code: found.error?.toUpperCase() || 'NO_ACCESS_SESSION' }, 401)
+  }
+  return json({ email: found.email })
+}
+
 /** Pulls the Access assertion out of the browser's cookie header. */
 function accessJwtFromCookies(cookieHeader) {
   for (const part of cookieHeader.split(';')) {
@@ -457,6 +472,14 @@ export default {
       else if (method === 'GET' && path === '/auth/status') response = await status(env, req)
       else if (method === 'POST' && path === '/auth/verify') response = await verify(env, req)
       else if (path === '/healthz') response = json({ ok: true })
+      else if (method === 'GET' && path === '/auth/identity') response = await identity(env, req)
+      else if (method === 'GET' && path === '/auth/start') {
+        // The place Cloudflare Access intercepts. A browser sent here without a
+        // session is redirected to the login and comes back with one; with a
+        // session it lands here, so answering 204 gives it nothing to parse and
+        // nothing to get stuck on.
+        response = new Response(null, { status: 204 })
+      }
 
       else response = json({ error: 'not_found' }, 404)
     } catch (err) {

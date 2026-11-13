@@ -137,16 +137,21 @@ export function getSession(): Session {
 }
 
 /**
- * Ask the engine who the caller is. `Cf-Access-Jwt-Assertion` is added by
- * Cloudflare, never by this page, so a 200 here proves the Access session is
- * live. Returns `null` when Access rejects the request.
+ * Ask the auth Worker who the caller is.
+ *
+ * Not the engine: it is an agent that is allowed to be down, and asking it here
+ * made a restart look like a sign-out. The Worker reads the Access assertion and
+ * answers from it alone, so this says whether the browser holds a real session
+ * regardless of what the engine is doing.
+ *
+ * A 401 means no session; a network failure means the Worker could not answer, and
+ * that must not be read as being signed out.
  */
-export async function refreshSessionFromEngine(): Promise<Session> {
+export async function refreshSession(): Promise<Session> {
   let res: Response
   try {
-    res = await fetch(`${ENGINE_URL}/v1/auth/whoami`, { credentials: 'include', cache: 'no-store' })
+    res = await fetch(`${AUTH_URL}/auth/identity`, { credentials: 'include', cache: 'no-store' })
   } catch {
-    // The engine being unreachable is not the same as being signed out.
     return getSession()
   }
   if (res.status === 401 || res.status === 403) {
@@ -154,17 +159,16 @@ export async function refreshSessionFromEngine(): Promise<Session> {
     return { authenticated: false, username: null, expiresAt: null }
   }
   if (!res.ok) return getSession()
-  const body = (await res.json().catch(() => null)) as { access_subject?: string | null } | null
-  if (!body) return getSession()
 
-  const username = (body.access_subject || '').trim()
+  const body = (await res.json().catch(() => null)) as { email?: string } | null
+  const username = String(body?.email || '').trim()
   if (!username) {
     clearProfile()
     return { authenticated: false, username: null, expiresAt: null }
   }
-  // Access sessions last as long as the application's session_duration; the
-  // exact expiry is inside the JWT, which this page cannot read. Cache for a
-  // day and let the next whoami call correct it.
+
+  // The expiry is in the assertion, which this page cannot read; a day is a
+  // placeholder that the next check corrects.
   const expiresAt = Math.floor(Date.now() / 1000) + 24 * 60 * 60
   writeProfile({ username, expiresAt })
   return {
@@ -256,11 +260,14 @@ export async function gateStatus(token: string): Promise<GateState> {
  */
 export function signIn(): void {
   clearProfile()
-  // This origin's own path, not the engine's hostname: Access sets its session
-  // cookie per host, and a cookie on engine.aixodia.dpdns.org is invisible to the
-  // SPA that runs here. Going through the same-origin proxy means the login and
-  // every later fetch share one host.
-  window.location.assign('/engine/v1/auth/whoami')
+  // A path this origin protects with Access, and nothing more. It must not be an
+  // engine route: sign-in is not the engine's job, and pointing here made the login
+  // wait on an agent that is allowed to be down. Any protected path will do, because
+  // Access only needs somewhere to intercept and return from.
+  //
+  // The same origin, not another hostname: Access sets its cookie per host, so a
+  // login at engine.example.com is invisible to the page running here.
+  window.location.assign('/engine/auth/start')
 }
 
 /**

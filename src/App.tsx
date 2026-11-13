@@ -27,7 +27,7 @@ export default function App() {
     // stopped engine does not look like a signed-out user.
     if (booted.current) return
     booted.current = true
-    api.refreshSessionFromEngine()
+    api.refreshSession()
       .then(next => {
         setSession(next)
         setPhase(next.authenticated ? 'home' : 'login')
@@ -93,14 +93,24 @@ export default function App() {
    * is a single round trip that either issues a session token or says the account
    * is not permitted.
    */
-  const handleSignIn = async () => {
+  /**
+   * Sign in.
+   *
+   * The order matters. Cloudflare Access is what establishes identity, so the
+   * browser has to pass through it before there is anything to exchange for a
+   * session token. Asking the Worker first could only ever fail for a first-time
+   * visitor: with no Access cookie there is no assertion to read, and the app
+   * reported that as a broken session rather than sending them to sign in.
+   *
+   * So this navigates to the guarded endpoint, and Access either returns at once
+   * (already signed in) or asks for a login and then returns. The app loads again
+   * at its own address with the cookie present, and `refreshSession`
+   * picks it up from there.
+   */
+  const handleSignIn = () => {
     setLoginBusy(true)
     setLoginError(null)
     try {
-      await api.requestToken()
-      // A session token is not what the engine checks: it wants the Access cookie
-      // for this host, which only the guarded endpoint can issue. Handing the
-      // browser over is what completes the sign-in.
       api.signIn()
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : 'Could not sign in.')
