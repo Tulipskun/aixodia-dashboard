@@ -1,74 +1,119 @@
 /**
- * Proxy `/engine/*` to the engine, on the console's own origin.
+ * Proxy `/engine/*` to the service that owns the path, on the console's origin.
  *
- * The console and the engine are separate hostnames under Cloudflare Access, and
- * Access sets `CF_AppSession` as a host-only cookie on whichever host it
- * authenticated. A browser that signed in at `engine.aixodia.dpdns.org`
- * therefore has no credential at `aixodia.dpdns.org`, so the SPA's
- * `fetch(..., { credentials: 'include' })` arrived unauthenticated and every call
- * came back 302 to the login page. Pointing the SPA at a same-origin path keeps
- * the cookie and the request on one host.
+ * Two upstreams, picked by path, because those two concerns have different
+ * availability requirements:
  *
- * The Access login itself still happens at the engine's hostname, which is where
- * the redirect sends the user; once back, the SPA's own calls ride the session
- * cookie Cloudflare set for this host.
+ * * `/v1/auth/*` belongs to the auth Worker. Sign-in has to work whether or not
+ *   the engine is running — the engine is an agent that also exposes
+ *   device-control routes, and it used to be the sign-in authority, so stopping it
+ *   logged everyone out.
+ * * everything else belongs to the engine, which is expected to be down sometimes.
  *
- * Only the engine's paths are forwarded. The proxy is not a general egress door:
- * a path is passed through only if it starts with `/v1/`, `/healthz` or
- * `/cdn-cgi/`, so a request cannot be shaped into reaching somewhere else.
+ * Proxying through this origin rather than calling each service's own hostname is
+ * not cosmetic: Cloudflare Access sets its session cookie per host, so a browser
+ * that signed in at another hostname has no credential here and every fetch came
+ * back 302 to the login page.
+ *
+ * Only the prefixes below are forwarded, so this is not a general egress door.
  */
 
+const AUTH = 'https://aixodia-auth.aixodia.workers.dev'
 const ENGINE = 'https://engine.aixodia.dpdns.org'
 
-const ALLOWED_PREFIXES = ['/v1/', '/healthz', '/cdn-cgi/']
+/** Paths the auth Worker answers. */
+const AUTH_PREFIXES = ['/v1/auth/']
+/** Paths the engine answers and that this proxy may reach. */
+const ENGINE_PREFIXES = ['/v1/', '/healthz', '/cdn-cgi/']
+
+function upstreamFor(path) {
+  if (AUTH_PREFIXES.some((prefix) => path.startsWith(prefix))) return AUTH
+  if (ENGINE_PREFIXES.some((prefix) => path.startsWith(prefix))) return ENGINE
+  return null
+}
 
 export async function onRequest({ request }) {
   const url = new URL(request.url)
   const path = url.pathname.replace(/^\/engine/, '') || '/'
 
-  if (!ALLOWED_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+  const upstreamBase = upstreamFor(path)
+  if (!upstreamBase) {
     return new Response('Not found', { status: 404 })
   }
 
-  const target = new URL(path + url.search, ENGINE)
+  const target = new URL(path + url.search, upstreamBase)
 
-  // Copy the headers that carry identity and content negotiation, and drop the
-  // ones that describe the hop rather than the request (Host, Content-Length is
-  // recomputed by fetch from the body).
+  // Copy the headers that carry identity and content negotiation; drop the ones
+  // that describe this hop rather than the request.
   const headers = new Headers()
-  for (const name of ['accept', 'accept-language', 'authorization', 'content-type', 'cookie', 'origin', 'referer', 'user-agent']) {
+  for (const name of [
+    'accept',
+    'accept-language',
+    'authorization',
+    'content-type',
+    'cookie',
+    'origin',
+    'referer',
+    'user-agent',
+    // Cloudflare puts the Access assertion on requests it authorised; the auth
+    // Worker needs it to know the confirm page was reached by a real login.
+    'cf-access-jwt-assertion',
+  ]) {
     const value = request.headers.get(name)
     if (value) headers.set(name, value)
   }
-  // The engine checks Host against its allowed origins; send its own.
-  headers.set('host', new URL(ENGINE).host)
+  headers.set('host', new URL(upstreamBase).host)
 
-  const init = {
-    method: request.method,
-    headers,
-    // Let the browser's Access cookie travel with the subrequest, and never
-    // follow a redirect here: a 302 to the login page has to reach the browser so
-    // the user can actually sign in.
-    redirect: 'manual',
-  }
+  // A 302 to the Access login has to reach the browser so the user can actually
+  // sign in, so redirects are passed through rather than followed.
+  const init = { method: request.method, headers, redirect: 'manual' }
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     init.body = await request.arrayBuffer()
   }
 
-  const upstream = await fetch(target.toString(), init)
+  let upstream
+  try {
+    upstream = await fetch(target.toString(), init)
+  } catch (err) {
+    // Name the outage rather than letting the SPA report a parse error. The console
+    // shows this text, and "engine unreachable" tells the user which half is down.
+    return new Response(
+      JSON.stringify({
+        error: 'upstream_unreachable',
+        code: upstreamBase === ENGINE ? 'ENGINE_DOWN' : 'AUTH_DOWN',
+        detail: String(err?.message || err),
+      }),
+      { status: 502, headers: { 'content-type': 'application/json' } },
+    )
+  }
 
-  // Pass the body and the headers that matter back. Set-Cookie is forwarded so a
-  // session refreshed by the engine still lands on this host.
   const responseHeaders = new Headers()
-  for (const name of ['content-type', 'cache-control', 'location', 'set-cookie', 'www-authenticate']) {
+  for (const name of [
+    'content-type',
+    'cache-control',
+    'location',
+    'set-cookie',
+    'www-authenticate',
+    'access-control-allow-origin',
+    'access-control-allow-methods',
+    'access-control-allow-headers',
+  ]) {
     const value = upstream.headers.get(name)
     if (value) responseHeaders.set(name, value)
   }
 
-  // CORS is not needed any more (same origin), and echoing an Access-Control-
-  // Allow-Origin here would only weaken the check the engine performs itself.
-  return new Response(upstream.body, {
-    status: upstream.status,
-    headers: responseHeaders,
-  })
+  // A Cloudflare outage answers HTML. Say so instead of letting the SPA try to
+  // parse it as JSON and report a type error.
+  const contentType = responseHeaders.get('content-type') || ''
+  if (upstream.status >= 500 && !contentType.includes('json')) {
+    return new Response(
+      JSON.stringify({
+        error: 'upstream_error',
+        code: upstreamBase === ENGINE ? 'ENGINE_DOWN' : 'AUTH_DOWN',
+      }),
+      { status: 502, headers: { 'content-type': 'application/json' } },
+    )
+  }
+
+  return new Response(upstream.body, { status: upstream.status, headers: responseHeaders })
 }
