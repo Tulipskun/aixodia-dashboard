@@ -6,7 +6,17 @@
 /** @typedef {{ token: string, expiresAt: number, refreshToken?: string, refreshExpiresAt?: number, user: string, scope: string }} StoredSession */
 /** @typedef {{ authenticated: boolean, username: string | null, expiresAt: string | null }} ClientSession */
 
-export const DEFAULT_ENGINE_URL = 'https://engine.aixodia.dpdns.org'
+/**
+ * Where the SPA reaches the engine.
+ *
+ * A relative path, not the engine's own hostname: Cloudflare Access sets its
+ * session cookie per host, so a browser signed in at engine.aixodia.dpdns.org
+ * carries no credential at aixodia.dpdns.org and every cross-host fetch arrived
+ * unauthenticated. `/engine` is served by the Pages Function in
+ * functions/engine/[[path]].js, which forwards to the engine on the same origin
+ * so the cookie and the request stay on one host.
+ */
+export const DEFAULT_ENGINE_URL = '/engine'
 
 /**
  * Normalize the configured engine base URL.

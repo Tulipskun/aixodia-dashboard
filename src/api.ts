@@ -175,7 +175,11 @@ export async function refreshSessionFromEngine(): Promise<Session> {
  */
 export function signIn(): void {
   clearProfile()
-  window.location.assign(`${ENGINE_URL}/v1/auth/whoami`)
+  // This origin's own path, not the engine's hostname: Access sets its session
+  // cookie per host, and a cookie on engine.aixodia.dpdns.org is invisible to the
+  // SPA that runs here. Going through the same-origin proxy means the login and
+  // every later fetch share one host.
+  window.location.assign('/engine/v1/auth/whoami')
 }
 
 /**
@@ -185,7 +189,7 @@ export function signIn(): void {
 export function logout(): void {
   clearProfile()
   const here = `${window.location.origin}${window.location.pathname}`
-  window.location.assign(`${ENGINE_URL}/cdn-cgi/access/logout?redirect_url=${encodeURIComponent(here)}`)
+  window.location.assign(`/engine/cdn-cgi/access/logout?redirect_url=${encodeURIComponent(here)}`)
 }
 
 // ---------------------------------------------------------------- transport

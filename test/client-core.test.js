@@ -46,7 +46,7 @@ function createFetch(handlers) {
 
 test('resolveEngineUrl defaults to the production tunnel and strips trailing slashes', () => {
   assert.equal(resolveEngineUrl(undefined), DEFAULT_ENGINE_URL)
-  assert.equal(DEFAULT_ENGINE_URL, 'https://engine.aixodia.dpdns.org')
+  assert.equal(DEFAULT_ENGINE_URL, '/engine')
   assert.equal(resolveEngineUrl(''), DEFAULT_ENGINE_URL)
   assert.equal(resolveEngineUrl('   '), DEFAULT_ENGINE_URL)
   assert.equal(resolveEngineUrl('http://127.0.0.1:8787/'), 'http://127.0.0.1:8787')
