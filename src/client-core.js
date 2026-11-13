@@ -72,11 +72,11 @@ export const DEVICE_PATHS = {
  * @param {(url: string, init: object) => Promise<{ ok: boolean, status: number, text: () => Promise<string> }>} fetchFn
  * @param {string} baseUrl
  * @param {string} path
- * @param {{ method?: string, body?: unknown }} [options]
+ * @param {{ method?: string, body?: unknown, headers?: Record<string, string> }} [options]
  * @returns {Promise<{ ok: boolean, status: number, data: unknown, error?: string, code?: string }>}
  */
 export async function engineCall(fetchFn, baseUrl, path, options = {}) {
-  const headers = {}
+  const headers = { ...(options.headers || {}) }
   if (options.body !== undefined) headers['Content-Type'] = 'application/json'
   let res
   try {

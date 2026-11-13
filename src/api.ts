@@ -125,6 +125,55 @@ export function getSession(): Session {
   }
 }
 
+/**
+ * The engine's bearer token, cached in memory only.
+ *
+ * The Access cookie proves identity to this origin, but the engine lives on
+ * another host, so the cookie never reaches it. `/auth/token` turns the cookie
+ * into a token the engine accepts (see `client_guard`), and that token is held in
+ * a module variable rather than storage so it dies with the tab.
+ */
+let engineToken: string | null = null
+let engineTokenExpiresAt = 0
+let tokenRequest: Promise<string | null> | null = null
+
+async function fetchEngineToken(): Promise<string | null> {
+  try {
+    const res = await fetch(`${AUTH_URL}/auth/token`, {
+      method: 'POST',
+      credentials: 'include',
+      cache: 'no-store',
+    })
+    if (!res.ok) return null
+    const body = (await res.json().catch(() => null)) as { token?: string; expires_at?: number } | null
+    const token = String(body?.token || '')
+    if (!token) return null
+    engineToken = token
+    engineTokenExpiresAt = Number(body?.expires_at || 0) * 1000
+    return token
+  } catch {
+    return null
+  }
+}
+
+/**
+ * A token for the engine, fetched once and shared by concurrent callers.
+ *
+ * Without the single-flight guard a dashboard load fires a handful of requests
+ * at once and each would mint its own session row.
+ */
+async function getEngineToken(force = false): Promise<string | null> {
+  const fresh = engineToken && engineTokenExpiresAt > Date.now() + 60_000
+  if (fresh && !force) return engineToken
+  if (!tokenRequest) {
+    tokenRequest = fetchEngineToken().finally(() => { tokenRequest = null })
+  }
+  return tokenRequest
+}
+
+/** Drops the cached token, so the next call re-mints one after a 401. */
+function forgetEngineToken(): void { engineToken = null; engineTokenExpiresAt = 0 }
+
 
 /**
  * Ask the auth Worker who the caller is.
@@ -234,6 +283,13 @@ function errorBody(data: unknown, status: number): ApiErrorBody {
 }
 async function fetchResponse(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = buildHeaders(init)
+  // The engine authorises with a bearer token; the Access cookie only covers this
+  // origin. Health and the public auth paths answer without one, so their failure
+  // to mint a token is not fatal — the request goes out either way.
+  if (!/^\/healthz(\?|$)/.test(path) && !path.startsWith('/v1/auth/')) {
+    const token = await getEngineToken()
+    if (token && !headers.Authorization) headers.Authorization = `Bearer ${token}`
+  }
   try {
     // Same-origin through the proxy in dev, cross-origin in production: either
     // way `credentials: 'include'` is what carries the Access cookie.
@@ -245,6 +301,26 @@ async function fetchResponse(path: string, init: RequestInit = {}): Promise<Resp
     })
   } catch {
     throw new ApiError(0, { error: 'Unable to connect to the engine.', code: 'NETWORK_ERROR' })
+  }
+}
+
+/**
+ * Runs `request`, re-minting the token once if the engine rejects it.
+ *
+ * The engine caches an `active` verdict for a few seconds and the token itself
+ * outlives many tabs, so a 401 here usually means the token was dropped on the
+ * Worker side rather than that the user is signed out.
+ */
+async function requestWithTokenRetry<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      forgetEngineToken()
+      await getEngineToken(true)
+      return await run()
+    }
+    throw error
   }
 }
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -326,18 +402,22 @@ async function deviceCall<T>(
   path: string,
   init: { method?: string; body?: unknown } = {},
 ): Promise<T> {
-  const result = await engineCall(fetch, ENGINE_URL, path, {
-    method: init.method,
-    body: init.body,
-  })
-  if (!result.ok) {
-    if (result.status === 401 || result.status === 403) onUnauthorized?.()
-    throw new ApiError(result.status, {
-      error: result.error ?? `HTTP ${result.status}`,
-      code: result.code ?? 'HTTP_ERROR',
+  return requestWithTokenRetry(async () => {
+    const token = await getEngineToken()
+    const result = await engineCall(fetch, ENGINE_URL, path, {
+      method: init.method,
+      body: init.body,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
     })
-  }
-  return result.data as T
+    if (!result.ok) {
+      if (result.status === 401 || result.status === 403) onUnauthorized?.()
+      throw new ApiError(result.status, {
+        error: result.error ?? `HTTP ${result.status}`,
+        code: result.code ?? 'HTTP_ERROR',
+      })
+    }
+    return result.data as T
+  })
 }
 
 export async function getDevices(_refresh = false): Promise<DevicesResponse> {

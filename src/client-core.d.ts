@@ -35,7 +35,7 @@ export function engineCall(
   fetchFn: typeof fetch,
   baseUrl: string,
   path: string,
-  options?: { method?: string; body?: unknown },
+  options?: { method?: string; body?: unknown; headers?: Record<string, string> },
 ): Promise<EngineCallResult>
 
 export interface ClientDevice {

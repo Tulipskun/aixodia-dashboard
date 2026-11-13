@@ -66,7 +66,13 @@ export async function onRequest({ request }) {
     'cf-access-jwt-assertion',
   ]) {
     const value = request.headers.get(name)
-    if (value) headers.set(name, value)
+    if (!value) continue
+    // This origin's cookies belong to this host. Forwarding them to the engine
+    // sends a CF_AppSession issued for the wrong hostname, which Access reads as
+    // a stale session and answers with a 302 — so the bypassed /v1 routes are
+    // reached without them. The engine authorises by bearer token anyway.
+    if (name === 'cookie' && upstreamBase === ENGINE && path.startsWith('/v1/')) continue
+    headers.set(name, value)
   }
   headers.set('host', new URL(upstreamBase).host)
 

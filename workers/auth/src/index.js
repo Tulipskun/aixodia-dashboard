@@ -24,6 +24,13 @@ const SESSION_PREFIX = ''
 const ACTIVE_TTL_SECS = 720 * 60 * 60
 const EMAIL_MAX = 254
 
+import * as device from './device.js'
+import { hooks, allowlist, permits } from './shared.js'
+
+// Published for device.js (which must not import this file's stack eagerly) and
+// for tests, which substitute a stub instead of faking RSA signatures.
+hooks.accessIdentity ||= (env, req) => accessIdentity(env, req)
+
 // ---------------------------------------------------------------- utilities
 
 const encoder = new TextEncoder()
@@ -89,26 +96,7 @@ function emailWellFormed(email) {
   return !/[\s\u0000-\u001f\u007f]/.test(trimmed)
 }
 
-async function allowlist(env) {
-  // KV first so an operator can change the list without a deploy; the var is the
-  // fallback for a fresh deployment whose KV is not written yet.
-  let raw = ''
-  try {
-    raw = (await env.CONFIG.get('auth/allowed_emails')) || ''
-  } catch {
-    // A KV read failure must not open the door; fall through to the var.
-  }
-  if (!raw.trim()) raw = env.AUTH_ALLOWED_EMAILS || ''
-  return raw
-    .split(',')
-    .map((entry) => entry.trim().toLowerCase())
-    .filter((entry) => entry.includes('@'))
-}
 
-function permits(list, email) {
-  const needle = String(email || '').trim().toLowerCase()
-  return needle.length > 0 && list.includes(needle)
-}
 
 // ---------------------------------------------------------------- schema
 
@@ -147,6 +135,43 @@ async function createSchema(env) {
   ).run()
   await env.DB.prepare(
     `CREATE UNIQUE INDEX IF NOT EXISTS gate_sessions_reference ON gate_sessions (reference)`,
+  ).run()
+  // Device Authorization Flow (auth_system.md): the app's sign-in attempts and
+  // the live tokens. Tokens are hashed; device codes are hashed too, while the
+  // user code stays readable because the approve page looks it up by it.
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS device_codes (
+       device_code_hash TEXT PRIMARY KEY NOT NULL,
+       user_code TEXT NOT NULL,
+       device_name TEXT NOT NULL,
+       state TEXT NOT NULL,
+       created_at INTEGER NOT NULL,
+       expires_at INTEGER NOT NULL,
+       approved_by TEXT,
+       token_hash TEXT
+     )`,
+  ).run()
+  await env.DB.prepare(
+    `CREATE UNIQUE INDEX IF NOT EXISTS device_codes_user_code
+     ON device_codes (user_code) WHERE state = 'pending'`,
+  ).run()
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS auth_tokens (
+       token_hash TEXT PRIMARY KEY NOT NULL,
+       email TEXT NOT NULL,
+       device_name TEXT NOT NULL,
+       state TEXT NOT NULL,
+       created_at INTEGER NOT NULL,
+       sync_state TEXT NOT NULL DEFAULT 'pending',
+       revoked_at INTEGER
+     )`,
+  ).run()
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS rate_limits (
+       key TEXT PRIMARY KEY NOT NULL,
+       window_start INTEGER NOT NULL,
+       count INTEGER NOT NULL
+     )`,
   ).run()
 }
 
@@ -187,7 +212,7 @@ const EXPLAIN = {
  * without verifying them would accept a token this Worker can be handed by anyone,
  * which the email field already allowed.
  */
-async function accessIdentity(env, req) {
+export async function accessIdentity(env, req) {
   // The header is what an Access-protected origin receives. The cookie is the same
   // assertion held by the browser: it is sent here because this Worker sits on its
   // own hostname, which Access does not protect and therefore does not annotate.
@@ -330,6 +355,47 @@ async function configValue(env, kvKey, varName) {
  * tokens are opaque. Asking here means revoking a session takes effect on both
  * sides at once.
  */
+/**
+ * Issues an engine token for the signed-in browser.
+ *
+ * The console runs on one host and the engine on another, so the Access cookie
+ * that proves who the user is never reaches the engine. This route turns that
+ * cookie into the bearer token the engine accepts: it reuses the caller's live
+ * session when one matches this email, and otherwise mints one that is already
+ * active, because reaching this route at all required a verified Access
+ * assertion — the allowlist check below is the remaining gate.
+ *
+ * The email comes from the assertion, never from the request body, so a caller
+ * cannot ask for someone else's token.
+ */
+async function issueToken(env, req) {
+  const found = await accessIdentity(env, req)
+  if (!found.email) {
+    return json({ error: 'unauthorized', code: found.error?.toUpperCase() || 'NO_ACCESS_SESSION' }, 401)
+  }
+  const email = found.email.toLowerCase()
+
+  const allowed = await allowlist(env)
+  if (allowed.length > 0 && !permits(allowed, email)) {
+    return json({ error: 'forbidden', code: 'EMAIL_NOT_ALLOWED', email }, 403)
+  }
+
+  await ensureSchema(env)
+
+  // A live session can be reused, but its token is not stored in a readable
+  // form, so a fresh one is minted every time and the old row is left to expire.
+  const token = randomToken()
+  const expiresAt = now() + ACTIVE_TTL_SECS
+  await env.DB.prepare(
+    `INSERT INTO gate_sessions (token_hash, email, reference, state, created_at, confirm_by, expires_at, confirmed_by)
+     VALUES (?1, ?2, ?3, 'active', ?4, ?5, ?5, ?2)`,
+  )
+    .bind(await tokenKey(token), email, randomReference(), now(), expiresAt)
+    .run()
+
+  return json({ token, email, expires_at: expiresAt })
+}
+
 async function verify(env, req) {
   const token = bearer(req)
   if (!token) {
@@ -382,8 +448,16 @@ export default {
     let response
     try {
       if (method === 'POST' && path === '/auth/verify') response = await verify(env, req)
+      else if (method === 'POST' && path === '/auth/device/code') response = await device.deviceCode(env, req)
+      else if (method === 'POST' && path === '/auth/device/token') response = await device.deviceToken(env, req)
+      else if (method === 'GET' && path === '/auth/device') response = await device.devicePage(env, req, url)
+      else if (method === 'POST' && path === '/auth/device/approve') response = await device.deviceApprove(env, req)
+      else if (method === 'GET' && path === '/auth/sessions') response = await device.sessionsList(env, req)
+      else if (method === 'POST' && path === '/auth/revoke') response = await device.revoke(env, req)
+      else if (method === 'GET' && path === '/auth/sessions/active') response = await device.activeSessions(env, req)
       else if (path === '/healthz') response = json({ ok: true })
       else if (method === 'GET' && path === '/auth/identity') response = await identity(env, req)
+      else if (method === 'POST' && path === '/auth/token') response = await issueToken(env, req)
       else if (method === 'GET' && path === '/auth/start') {
         // The place Cloudflare Access intercepts. A browser sent here without a
         // session is redirected to the login and comes back with one; with a
