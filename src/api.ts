@@ -73,17 +73,6 @@ export class ApiError extends Error {
   }
 }
 
-/** What the auth Worker hands back when it issues a token. */
-export interface GateToken {
-  token: string
-  state: 'pending'
-  reference: string
-  confirm_path: string
-  expires_at: number
-}
-
-export type GateState = 'pending' | 'active' | 'expired' | 'revoked' | 'unknown'
-
 let onUnauthorized: (() => void) | null = null
 export function setUnauthorizedHandler(fn: (() => void) | null) {
   onUnauthorized = fn
@@ -136,6 +125,7 @@ export function getSession(): Session {
   }
 }
 
+
 /**
  * Ask the auth Worker who the caller is.
  *
@@ -179,66 +169,6 @@ export async function refreshSession(): Promise<Session> {
 }
 
 /**
- * Start a sign-in.
- *
- * The Worker reads the identity from the Cloudflare Access assertion, so there is
- * nothing to ask the user for: they have already signed in, and retyping their
- * address could only match or fail to match the session they hold. The Worker
- * checks the address against the allowlist and issues a session token.
- *
- * `AUTH_URL`, not `ENGINE_URL`: this is the auth Worker. It answers whether or not
- * the engine is running, which is the point of the split — an agent being down
- * should not lock anyone out of the console.
- */
-export async function requestToken(): Promise<GateToken> {
-  const res = await fetch(`${AUTH_URL}/auth/request`, {
-    method: 'POST',
-    credentials: 'include',
-  })
-  const body = (await res.json().catch(() => null)) as Record<string, unknown> | null
-  if (!res.ok) {
-    const code = String(body?.code || '')
-    // A deployment with no allowlist is a setup problem, not a refused address;
-    // saying so is what stops an operator from debugging the wrong half.
-    if (code === 'NO_ALLOWLIST') {
-      throw new Error('This console has no allowed emails configured yet.')
-    }
-    if (code === 'EMAIL_NOT_ALLOWED') {
-      throw new Error('This account is not allowed to use the console.')
-    }
-    if (code === 'NO_ACCESS_SESSION' || code === 'NO_ACCESS_CONFIG') {
-      throw new Error('Your Cloudflare Access session is not available. Sign in again.')
-    }
-    throw new Error('Could not start sign-in. Try again.')
-  }
-  if (!body?.['token'] || !body?.['confirm_path']) {
-    throw new Error('The sign-in service returned an unexpected answer.')
-  }
-  return body as unknown as GateToken
-}
-
-/**
- * Poll a pending token until it is confirmed.
- *
- * The token is the credential, so it is sent as a bearer header rather than in the
- * URL: a token in a query string ends up in logs and history.
- */
-export async function gateStatus(token: string): Promise<GateState> {
-  const res = await fetch(`${AUTH_URL}/auth/status`, {
-    headers: { Authorization: `Bearer ${token}` },
-    credentials: 'include',
-    cache: 'no-store',
-  })
-  if (!res.ok) return 'expired'
-  const body = (await res.json().catch(() => null)) as { state?: string } | null
-  const state = String(body?.state || '')
-  if (state === 'active' || state === 'pending' || state === 'expired' || state === 'revoked') {
-    return state as GateState
-  }
-  return 'expired'
-}
-
-/**
  * Send the browser to the engine so Cloudflare Access runs the login, then come
  * back to this exact URL.
  *
@@ -277,7 +207,11 @@ export function signIn(): void {
 export function logout(): void {
   clearProfile()
   const here = `${window.location.origin}${window.location.pathname}`
-  window.location.assign(`/engine/cdn-cgi/access/logout?redirect_url=${encodeURIComponent(here)}`)
+  // This origin's own endpoint, not the proxied one. `/cdn-cgi/*` is handled by
+  // Cloudflare on the host it is requested from, and the proxy forwards `/engine/*`
+  // to the engine, so `/engine/cdn-cgi/access/logout` was answered by something that
+  // is not the Access logout and left the session in place.
+  window.location.assign(`/cdn-cgi/access/logout?redirect_url=${encodeURIComponent(here)}`)
 }
 
 // ---------------------------------------------------------------- transport

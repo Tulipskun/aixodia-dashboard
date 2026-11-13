@@ -324,93 +324,6 @@ async function configValue(env, kvKey, varName) {
 }
 
 /**
- * Starts a session for whoever Access has already authenticated.
- *
- * There is no email field. Asking the user to type the address they just signed in
- * with adds a step that cannot succeed unless it matches the session, and gives a
- * caller a way to name someone else. The identity comes from the assertion, and the
- * allowlist decides whether that identity may use the console.
- */
-async function request(env, req) {
-  const identity = await accessIdentity(env, req)
-  if (identity.error === 'not_configured') {
-    return json({ error: 'not_configured', code: 'NO_ACCESS_CONFIG' }, 503)
-  }
-  if (!identity.email) {
-    return json({ error: 'unauthorized', code: 'NO_ACCESS_SESSION' }, 401)
-  }
-
-  const list = await allowlist(env)
-  if (list.length === 0) {
-    // Distinct from "not on the list": this is a deployment mistake and saying so
-    // saves an operator from debugging the client.
-    return json({ error: 'not_configured', code: 'NO_ALLOWLIST' }, 503)
-  }
-  if (!permits(list, identity.email)) {
-    return json({ error: 'forbidden', code: 'EMAIL_NOT_ALLOWED' }, 403)
-  }
-
-  await ensureSchema(env)
-
-  const token = randomToken()
-  const reference = randomReference()
-  const t = now()
-
-  // Only the confirmation window applies: the caller has already proved identity a
-  // moment ago, so there is no reason to make them wait to confirm again.
-  await env.DB.prepare(
-    `INSERT INTO gate_sessions
-       (token_hash, email, reference, state, created_at, confirm_by, expires_at, confirmed_by)
-     VALUES (?1, ?2, ?3, 'active', ?4, ?5, ?6, ?7)`,
-  )
-    .bind(
-      await tokenKey(token),
-      identity.email,
-      reference,
-      t,
-      t + ACTIVE_TTL_SECS,
-      t + ACTIVE_TTL_SECS,
-      'access',
-    )
-    .run()
-
-  return json({
-    token,
-    state: 'active',
-    email: identity.email,
-    expires_at: t + ACTIVE_TTL_SECS,
-  })
-}
-
-/**
- * Status of the caller's own token.
- *
- * Takes the token as a bearer credential, so it describes the caller's session and
- * nobody else's.
- */
-async function status(env, req) {
-  const token = bearer(req)
-  if (!token) {
-    return json({ error: 'unauthorized', code: 'NO_TOKEN' }, 401)
-  }
-
-  await ensureSchema(env)
-
-  const row = await env.DB.prepare(
-    `SELECT state, email, expires_at, confirm_by FROM gate_sessions WHERE token_hash = ?1`,
-  )
-    .bind(await tokenKey(token))
-    .first()
-
-  if (!row) {
-    return json({ error: 'unauthorized', code: 'UNKNOWN_TOKEN' }, 401)
-  }
-  const state = effectiveState(row)
-  const deadline = state === 'pending' ? row.confirm_by : row.expires_at
-  return json({ state, email: row.email, expires_at: deadline })
-}
-
-/**
  * What the engine asks: is this token valid, and for whom.
  *
  * The engine does not hold the token table and cannot check a signature, because
@@ -468,9 +381,7 @@ export default {
 
     let response
     try {
-      if (method === 'POST' && path === '/auth/request') response = await request(env, req)
-      else if (method === 'GET' && path === '/auth/status') response = await status(env, req)
-      else if (method === 'POST' && path === '/auth/verify') response = await verify(env, req)
+      if (method === 'POST' && path === '/auth/verify') response = await verify(env, req)
       else if (path === '/healthz') response = json({ ok: true })
       else if (method === 'GET' && path === '/auth/identity') response = await identity(env, req)
       else if (method === 'GET' && path === '/auth/start') {
