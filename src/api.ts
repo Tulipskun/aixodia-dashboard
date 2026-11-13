@@ -23,7 +23,7 @@ import {
 // ---------------------------------------------------------------- config
 // The SPA talks to the AIxodia Engine directly (no Cloudflare Worker), and that
 // origin sits behind Cloudflare Access. VITE_ENGINE_URL is the Access-protected
-// hostname (default https://aixodia.dpdns.org); the browser's Access cookie is
+// hostname (default https://engine.aixodia.dpdns.org); the browser's Access cookie is
 // what authorises every call. See .env.example and vite.config.ts for the
 // local-dev options (direct 127.0.0.1:8787 or the /engine Vite proxy); the
 // engine answers CORS itself per ALLOWED_ORIGINS.

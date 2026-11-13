@@ -6,7 +6,7 @@
 /** @typedef {{ token: string, expiresAt: number, refreshToken?: string, refreshExpiresAt?: number, user: string, scope: string }} StoredSession */
 /** @typedef {{ authenticated: boolean, username: string | null, expiresAt: string | null }} ClientSession */
 
-export const DEFAULT_ENGINE_URL = 'https://aixodia.dpdns.org'
+export const DEFAULT_ENGINE_URL = 'https://engine.aixodia.dpdns.org'
 
 /**
  * Normalize the configured engine base URL.
