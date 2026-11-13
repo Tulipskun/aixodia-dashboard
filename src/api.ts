@@ -175,22 +175,20 @@ export async function refreshSessionFromEngine(): Promise<Session> {
 }
 
 /**
- * Start an email sign-in.
+ * Start a sign-in.
  *
- * The auth Worker issues a token in state `pending`, which is useless until the
- * user confirms it. That two-step exists so that asking for a token is not enough
- * to get one: the address has to be on the allowlist, and the person holding it
- * has to prove it by opening the link.
+ * The Worker reads the identity from the Cloudflare Access assertion, so there is
+ * nothing to ask the user for: they have already signed in, and retyping their
+ * address could only match or fail to match the session they hold. The Worker
+ * checks the address against the allowlist and issues a session token.
  *
  * `AUTH_URL`, not `ENGINE_URL`: this is the auth Worker. It answers whether or not
  * the engine is running, which is the point of the split — an agent being down
  * should not lock anyone out of the console.
  */
-export async function requestEmailToken(email: string): Promise<GateToken> {
+export async function requestToken(): Promise<GateToken> {
   const res = await fetch(`${AUTH_URL}/auth/request`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
     credentials: 'include',
   })
   const body = (await res.json().catch(() => null)) as Record<string, unknown> | null
@@ -201,8 +199,11 @@ export async function requestEmailToken(email: string): Promise<GateToken> {
     if (code === 'NO_ALLOWLIST') {
       throw new Error('This console has no allowed emails configured yet.')
     }
-    if (code === 'EMAIL_NOT_ALLOWED' || code === 'BAD_EMAIL') {
-      throw new Error('That email is not allowed to sign in.')
+    if (code === 'EMAIL_NOT_ALLOWED') {
+      throw new Error('This account is not allowed to use the console.')
+    }
+    if (code === 'NO_ACCESS_SESSION' || code === 'NO_ACCESS_CONFIG') {
+      throw new Error('Your Cloudflare Access session is not available. Sign in again.')
     }
     throw new Error('Could not start sign-in. Try again.')
   }

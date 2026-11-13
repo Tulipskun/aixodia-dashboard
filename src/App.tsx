@@ -15,10 +15,6 @@ export default function App() {
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
   const [loginBusy, setLoginBusy] = useState(false)
   const [loginError, setLoginError] = useState<string | null>(null)
-  /** A token that has been issued but not yet confirmed. */
-  const [gatePending, setGatePending] = useState<
-    { email: string; confirmUrl: string; token: string } | null
-  >(null)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false)
   const accountMenuRef = useRef<HTMLDivElement>(null)
@@ -90,53 +86,27 @@ export default function App() {
   }, [logoutConfirmOpen])
 
   /**
-   * Start an email sign-in and wait for the confirmation.
+   * Sign in.
    *
-   * The token is useless until confirmed, so there is nothing to gain from
-   * navigating away immediately: the app holds a pending token, shows the link, and
-   * polls until the Worker reports it active. Polling every two seconds is cheap
-   * because a status read is a single indexed D1 lookup with no write.
+   * Nothing is asked for: whoever is using the browser has already passed
+   * Cloudflare Access, and the Worker reads that identity from the assertion. This
+   * is a single round trip that either issues a session token or says the account
+   * is not permitted.
    */
-  const handleEmailSubmit = async (email: string) => {
+  const handleSignIn = async () => {
     setLoginBusy(true)
     setLoginError(null)
     try {
-      const issued = await api.requestEmailToken(email)
-      setGatePending({ email, confirmUrl: issued.confirm_path, token: issued.token })
-      setLoginBusy(false)
+      await api.requestToken()
+      // A session token is not what the engine checks: it wants the Access cookie
+      // for this host, which only the guarded endpoint can issue. Handing the
+      // browser over is what completes the sign-in.
+      api.signIn()
     } catch (error) {
-      setLoginError(error instanceof Error ? error.message : 'Could not start sign-in.')
+      setLoginError(error instanceof Error ? error.message : 'Could not sign in.')
       setLoginBusy(false)
     }
   }
-
-  // Watch a pending token until it becomes usable. The interval is cleared as soon
-  // as the answer is final, so a closed tab does not keep polling.
-  useEffect(() => {
-    if (!gatePending) return
-    let cancelled = false
-    const tick = async () => {
-      const state = await api.gateStatus(gatePending.token)
-      if (cancelled) return
-      if (state === 'active') {
-        setGatePending(null)
-        setLoginBusy(true)
-        // The Worker has confirmed the session; hand the browser to the guarded
-        // endpoint so Cloudflare Access issues its cookie for this host, which is
-        // what every later engine call needs.
-        api.signIn()
-      } else if (state === 'expired' || state === 'revoked') {
-        setGatePending(null)
-        setLoginError('That confirmation link has expired. Start again.')
-      }
-    }
-    const timer = window.setInterval(tick, 2000)
-    void tick()
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
-  }, [gatePending])
 
   const handleLogout = () => {
     setSession(null)
@@ -151,9 +121,7 @@ export default function App() {
   if (phase === 'login') {
     return (
       <LoginPage
-        onEmailSubmit={handleEmailSubmit}
-        onWaitingDismiss={() => { setGatePending(null); setLoginError(null) }}
-        pending={gatePending ? { email: gatePending.email, confirmUrl: gatePending.confirmUrl } : null}
+        onSignIn={handleSignIn}
         busy={loginBusy}
         error={loginError}
       />
