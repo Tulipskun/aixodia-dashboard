@@ -29,6 +29,16 @@ import {
 // engine answers CORS itself per ALLOWED_ORIGINS.
 const ENGINE_URL = resolveEngineUrl(import.meta.env.VITE_ENGINE_URL)
 
+/**
+ * The auth Worker, reached through this origin's proxy.
+ *
+ * Sign-in must not go through the engine: it is an agent that also exposes
+ * device-control routes, and its uptime used to be a login requirement. The same
+ * proxy carries both so the Access cookie, which is set per host, applies to them
+ * equally.
+ */
+const AUTH_URL = `${ENGINE_URL.replace(/\/$/, '')}`
+
 // Path constants are derived through enginePath() so the legacy /api/* mapping
 // (/api/health -> /healthz, /api/engine/v1/* -> /v1/*) stays explicit and
 // unit-testable (see test/client-core.test.js).
@@ -62,6 +72,17 @@ export class ApiError extends Error {
     this.body = body
   }
 }
+
+/** What the auth Worker hands back when it issues a token. */
+export interface GateToken {
+  token: string
+  state: 'pending'
+  reference: string
+  confirm_path: string
+  expires_at: number
+}
+
+export type GateState = 'pending' | 'active' | 'expired' | 'revoked' | 'unknown'
 
 let onUnauthorized: (() => void) | null = null
 export function setUnauthorizedHandler(fn: (() => void) | null) {
@@ -151,6 +172,65 @@ export async function refreshSessionFromEngine(): Promise<Session> {
     username,
     expiresAt: new Date(expiresAt * 1000).toISOString(),
   }
+}
+
+/**
+ * Start an email sign-in.
+ *
+ * The auth Worker issues a token in state `pending`, which is useless until the
+ * user confirms it. That two-step exists so that asking for a token is not enough
+ * to get one: the address has to be on the allowlist, and the person holding it
+ * has to prove it by opening the link.
+ *
+ * `AUTH_URL`, not `ENGINE_URL`: this is the auth Worker. It answers whether or not
+ * the engine is running, which is the point of the split — an agent being down
+ * should not lock anyone out of the console.
+ */
+export async function requestEmailToken(email: string): Promise<GateToken> {
+  const res = await fetch(`${AUTH_URL}/auth/request`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+    credentials: 'include',
+  })
+  const body = (await res.json().catch(() => null)) as Record<string, unknown> | null
+  if (!res.ok) {
+    const code = String(body?.code || '')
+    // A deployment with no allowlist is a setup problem, not a refused address;
+    // saying so is what stops an operator from debugging the wrong half.
+    if (code === 'NO_ALLOWLIST') {
+      throw new Error('This console has no allowed emails configured yet.')
+    }
+    if (code === 'EMAIL_NOT_ALLOWED' || code === 'BAD_EMAIL') {
+      throw new Error('That email is not allowed to sign in.')
+    }
+    throw new Error('Could not start sign-in. Try again.')
+  }
+  if (!body?.['token'] || !body?.['confirm_path']) {
+    throw new Error('The sign-in service returned an unexpected answer.')
+  }
+  return body as unknown as GateToken
+}
+
+/**
+ * Poll a pending token until it is confirmed.
+ *
+ * The token is the credential, so it is sent as a bearer header rather than in the
+ * URL: a token in a query string ends up in logs and history.
+ */
+export async function gateStatus(token: string): Promise<GateState> {
+  const res = await fetch(`${AUTH_URL}/auth/status`, {
+    headers: { Authorization: `Bearer ${token}` },
+    credentials: 'include',
+    cache: 'no-store',
+  })
+  if (!res.ok) return 'expired'
+  const body = (await res.json().catch(() => null)) as { state?: string } | null
+  const state = String(body?.state || '')
+  if (state === 'active' || state === 'pending' || state === 'expired' || state === 'revoked') {
+    return state as GateState
+  }
+  return 'expired'
 }
 
 /**

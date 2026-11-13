@@ -15,6 +15,10 @@ export default function App() {
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
   const [loginBusy, setLoginBusy] = useState(false)
   const [loginError, setLoginError] = useState<string | null>(null)
+  /** A token that has been issued but not yet confirmed. */
+  const [gatePending, setGatePending] = useState<
+    { email: string; confirmUrl: string; token: string } | null
+  >(null)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false)
   const accountMenuRef = useRef<HTMLDivElement>(null)
@@ -85,18 +89,54 @@ export default function App() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [logoutConfirmOpen])
 
-  const handleSignIn = () => {
+  /**
+   * Start an email sign-in and wait for the confirmation.
+   *
+   * The token is useless until confirmed, so there is nothing to gain from
+   * navigating away immediately: the app holds a pending token, shows the link, and
+   * polls until the Worker reports it active. Polling every two seconds is cheap
+   * because a status read is a single indexed D1 lookup with no write.
+   */
+  const handleEmailSubmit = async (email: string) => {
     setLoginBusy(true)
     setLoginError(null)
     try {
-      // Full-page navigation: Cloudflare Access shows the identity provider
-      // choice and returns to this URL once the session exists.
-      api.signIn()
+      const issued = await api.requestEmailToken(email)
+      setGatePending({ email, confirmUrl: issued.confirm_path, token: issued.token })
+      setLoginBusy(false)
     } catch (error) {
-      setLoginError(error instanceof Error ? error.message : 'Unable to open the sign-in page.')
+      setLoginError(error instanceof Error ? error.message : 'Could not start sign-in.')
       setLoginBusy(false)
     }
   }
+
+  // Watch a pending token until it becomes usable. The interval is cleared as soon
+  // as the answer is final, so a closed tab does not keep polling.
+  useEffect(() => {
+    if (!gatePending) return
+    let cancelled = false
+    const tick = async () => {
+      const state = await api.gateStatus(gatePending.token)
+      if (cancelled) return
+      if (state === 'active') {
+        setGatePending(null)
+        setLoginBusy(true)
+        // The Worker has confirmed the session; hand the browser to the guarded
+        // endpoint so Cloudflare Access issues its cookie for this host, which is
+        // what every later engine call needs.
+        api.signIn()
+      } else if (state === 'expired' || state === 'revoked') {
+        setGatePending(null)
+        setLoginError('That confirmation link has expired. Start again.')
+      }
+    }
+    const timer = window.setInterval(tick, 2000)
+    void tick()
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [gatePending])
 
   const handleLogout = () => {
     setSession(null)
@@ -111,7 +151,9 @@ export default function App() {
   if (phase === 'login') {
     return (
       <LoginPage
-        onStart={handleSignIn}
+        onEmailSubmit={handleEmailSubmit}
+        onWaitingDismiss={() => { setGatePending(null); setLoginError(null) }}
+        pending={gatePending ? { email: gatePending.email, confirmUrl: gatePending.confirmUrl } : null}
         busy={loginBusy}
         error={loginError}
       />

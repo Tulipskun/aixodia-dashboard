@@ -234,14 +234,19 @@ export function OfflineState({
 // ---------------------------------------------------------------- login
 
 export function LoginPage({
-  onStart,
+  onEmailSubmit,
+  onWaitingDismiss,
   busy,
   error,
+  pending,
 }: {
-  onStart: () => void
+  onEmailSubmit: (email: string) => void
+  onWaitingDismiss: () => void
   busy: boolean
   error: string | null
+  pending: { email: string; confirmUrl: string } | null
 }) {
+  const [email, setEmail] = useState('')
   return (
     <main className="ax-login-page">
       <div className="ax-login-ambient" aria-hidden="true" />
@@ -282,16 +287,62 @@ export function LoginPage({
         <section className="ax-login-panel" aria-labelledby="ax-login-title">
           <h2 id="ax-login-title">Sign in</h2>
           {error && <div className="ax-login-error"><ErrorBanner message={error} /></div>}
-          <div className="ax-login-device">
-            <p className="ax-login-note">
-              Sign in with GitHub or a one-time email PIN. Cloudflare Access handles the
-              sign-in and returns you here automatically.
-            </p>
-            <button className="ax-github-button" type="button" onClick={onStart} disabled={busy}>
-              {busy ? <Loader2 size={19} className="spin" /> : <ShieldCheck size={19} />}
-              <span>{busy ? 'Opening sign-in…' : 'Continue to sign in'}</span>
-            </button>
-          </div>
+
+          {pending ? (
+            <div className="ax-login-device">
+              <p className="ax-login-note">
+                Open the confirmation link sent for <strong>{pending.email}</strong>, then
+                this page finishes signing you in on its own.
+              </p>
+              <a
+                className="ax-github-button"
+                href={pending.confirmUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <ShieldCheck size={19} />
+                <span>Open confirmation</span>
+              </a>
+              <button
+                className="ax-login-secondary"
+                type="button"
+                onClick={onWaitingDismiss}
+              >
+                Use a different email
+              </button>
+            </div>
+          ) : (
+            <div className="ax-login-device">
+              <p className="ax-login-note">
+                Sign in with your email. You will confirm the session once, then this
+                browser stays signed in.
+              </p>
+              <form
+                className="ax-login-form"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  if (!busy && email.trim()) onEmailSubmit(email.trim())
+                }}
+              >
+                <label className="ax-login-label" htmlFor="ax-login-email">Email</label>
+                <input
+                  id="ax-login-email"
+                  className="ax-login-input"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  disabled={busy}
+                  required
+                />
+                <button className="ax-github-button" type="submit" disabled={busy}>
+                  {busy ? <Loader2 size={19} className="spin" /> : <ShieldCheck size={19} />}
+                  <span>{busy ? 'Starting…' : 'Continue'}</span>
+                </button>
+              </form>
+            </div>
+          )}
         </section>
       </div>
     </main>

@@ -5,3 +5,6 @@ dist/
 .env.*
 !.env.example
 .DS_Store
+
+# Screenshots taken while checking the UI
+.shots/
