@@ -26,5 +26,11 @@ database_id = "e8e746ea-691e-43bf-9fe2-c4e4016f29a1"
 # reading of "not configured". The KV key auth/allowed_emails overrides it.
 AUTH_ALLOWED_EMAILS = ""
 
+# The Access applications that may vouch for a browser here, comma-separated.
+# There are several because the console origin and the engine's own hostname are
+# protected separately, and a session issued by one is a real session at the other.
+# ACCESS_APP_AUD in KV stays the primary; this only widens what is accepted.
+ACCESS_ACCEPTED_AUDIENCES = "9cb93a11871fead4219e2a9f3f303cc17b9d809d426c26e208e8f1cf1c1a9bcf,1e2270863178234a46c4f3e1c91a4dc2558d6b428258e4b63ff365fea607cbbd"
+
 [observability]
 enabled = true

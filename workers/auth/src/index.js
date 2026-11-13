@@ -188,7 +188,13 @@ const EXPLAIN = {
  * which the email field already allowed.
  */
 async function accessIdentity(env, req) {
-  const assertion = req.headers.get('cf-access-jwt-assertion') || ''
+  // The header is what an Access-protected origin receives. The cookie is the same
+  // assertion held by the browser: it is sent here because this Worker sits on its
+  // own hostname, which Access does not protect and therefore does not annotate.
+  // Both carry a token signed by the same team key, so the checks below are what
+  // make either one trustworthy.
+  const assertion =
+    req.headers.get('cf-access-jwt-assertion') || accessJwtFromCookies(req.headers.get('cookie') || '')
   if (!assertion) return { error: 'no_assertion' }
 
   const parts = assertion.split('.')
@@ -210,7 +216,17 @@ async function accessIdentity(env, req) {
   const verified = await verifySignature(assertion, header, teamDomain)
   if (!verified) return { error: 'bad_signature' }
 
-  if (claims.aud !== audience) return { error: 'wrong_audience' }
+  // The assertion carries the audience of the Access application that issued it, and
+  // several protect this product: the console origin and the engine's own hostname
+  // are separate applications with separate tags. Accepting only one would refuse a
+  // browser that signed in through the other, which is what made every console
+  // sign-in fail while curl against the engine looked fine.
+  const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud]
+  const accepted = (env.ACCESS_ACCEPTED_AUDIENCES || audience)
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+  if (!audiences.some((tag) => accepted.includes(tag))) return { error: 'wrong_audience' }
   if (typeof claims.exp === 'number' && claims.exp * 1000 < Date.now()) return { error: 'expired' }
 
   const email = String(claims.email || claims.sub || '').trim()
@@ -260,6 +276,18 @@ async function verifySignature(assertion, header, teamDomain) {
   } catch {
     return false
   }
+}
+
+/** Pulls the Access assertion out of the browser's cookie header. */
+function accessJwtFromCookies(cookieHeader) {
+  for (const part of cookieHeader.split(';')) {
+    const index = part.indexOf('=')
+    if (index < 0) continue
+    if (part.slice(0, index).trim() !== 'CF_Authorization') continue
+    const value = part.slice(index + 1).trim()
+    return value ? decodeURIComponent(value) : ''
+  }
+  return ''
 }
 
 function base64urlDecode(value) {
@@ -429,14 +457,18 @@ export default {
       else if (method === 'GET' && path === '/auth/status') response = await status(env, req)
       else if (method === 'POST' && path === '/auth/verify') response = await verify(env, req)
       else if (path === '/healthz') response = json({ ok: true })
+
       else response = json({ error: 'not_found' }, 404)
     } catch (err) {
       // A D1 outage must not read as a credential problem: the app would tell the
-      // user their email was rejected.
-      response = json({ error: 'server_error', code: 'STORAGE_FAILED', detail: String(err?.message || err) }, 500)
+      // user their account was rejected.
+      response = json(
+        { error: 'server_error', code: 'STORAGE_FAILED', detail: String(err?.message || err) },
+        500,
+      )
     }
 
-    for (const [k, v] of Object.entries(cors)) response.headers.set(k, v)
+    for (const [key, value] of Object.entries(cors)) response.headers.set(key, value)
     return response
   },
 }
