@@ -42,7 +42,7 @@ export function isExpired(expiresAtSeconds, nowMs = Date.now()) {
 /**
  * Map the historical client-facing /api/* paths to the engine's direct paths.
  * /api/session, /api/auth/github and /api/logout were removed entirely: the
- * session is local-only now and login is POST /v1/auth/token.
+ * session is local-only now and login is POST /api/auth/token.
  * @param {string} legacyPath
  * @returns {string}
  */
@@ -55,13 +55,13 @@ export function enginePath(legacyPath) {
 
 // ---------------------------------------------------------------- devices
 // The engine owns the device/MCP gateway routes directly (no Worker service
-// binding). These paths are the real /v1/* endpoints; api.ts calls them with
+// binding). These paths are the engine's own /api/* routes; api.ts calls them with
 // the browser's Cloudflare Access cookie, so no token is passed here.
 
 export const DEVICE_PATHS = {
-  list: '/v1/devices',
-  tools: (id) => `/v1/devices/${encodeURIComponent(id)}/tools`,
-  action: (id) => `/v1/devices/${encodeURIComponent(id)}/action`,
+  list: '/api/devices',
+  tools: (id) => `/api/devices/${encodeURIComponent(id)}/tools`,
+  action: (id) => `/api/devices/${encodeURIComponent(id)}/action`,
 }
 
 /**
@@ -144,7 +144,7 @@ export function normalizeDevice(raw) {
 }
 
 /**
- * Normalize GET /v1/devices. The engine returns both `devices` and `items`
+ * Normalize GET /api/devices. The engine returns both `devices` and `items`
  * aliases plus an optional `note` (present when the registry is empty). An
  * empty list with a note is a successful, readable response — not an error.
  * @param {unknown} data
@@ -164,7 +164,7 @@ export function normalizeDevices(data) {
   }
 }
 
-/** Normalize GET /v1/devices/{id}/tools into `{ tools }`. @param {unknown} data */
+/** Normalize GET /api/devices/{id}/tools into `{ tools }`. @param {unknown} data */
 export function normalizeDeviceTools(data) {
   const root = (data && typeof data === 'object') ? data : {}
   const raw = Array.isArray(root.tools) ? root.tools : []
@@ -179,7 +179,7 @@ export function normalizeDeviceTools(data) {
 }
 
 /**
- * Normalize POST /v1/devices/{id}/action into a DeviceActionResult.
+ * Normalize POST /api/devices/{id}/action into a DeviceActionResult.
  * @param {unknown} data
  * @param {string} id
  * @param {string} tool

@@ -24,13 +24,14 @@ const ENGINE = 'https://engine.aixodia.dpdns.org'
 /**
  * Paths the auth Worker answers.
  *
- * `/auth/*`, not `/v1/auth/*`: the engine already serves `/v1/auth/whoami` and the
- * GitHub exchange, and two services answering under one prefix made it ambiguous
- * which one owned a sign-in path. The Worker keeps its own namespace.
+ * `/auth/*`, not `/api/auth/*`: the engine also serves paths under `/api/auth/`
+ * (whoami and the GitHub exchange), and two services answering under one prefix
+ * made it ambiguous which one owned a sign-in path. The Worker keeps its own
+ * namespace.
  */
 const AUTH_PREFIXES = ['/auth/']
 /** Paths the engine answers and that this proxy may reach. */
-const ENGINE_PREFIXES = ['/v1/', '/healthz', '/cdn-cgi/']
+const ENGINE_PREFIXES = ['/api/', '/healthz', '/cdn-cgi/']
 
 function upstreamFor(path) {
   if (AUTH_PREFIXES.some((prefix) => path.startsWith(prefix))) return AUTH
@@ -71,7 +72,7 @@ export async function onRequest({ request }) {
     // sends a CF_AppSession issued for the wrong hostname, which Access reads as
     // a stale session and answers with a 302 — so the bypassed /v1 routes are
     // reached without them. The engine authorises by bearer token anyway.
-    if (name === 'cookie' && upstreamBase === ENGINE && path.startsWith('/v1/')) continue
+    if (name === 'cookie' && upstreamBase === ENGINE && path.startsWith('/api/')) continue
     headers.set(name, value)
   }
   headers.set('host', new URL(upstreamBase).host)

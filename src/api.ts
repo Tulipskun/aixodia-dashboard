@@ -40,12 +40,12 @@ const ENGINE_URL = resolveEngineUrl(import.meta.env.VITE_ENGINE_URL)
 const AUTH_URL = `${ENGINE_URL.replace(/\/$/, '')}`
 
 // Path constants are derived through enginePath() so the legacy /api/* mapping
-// (/api/health -> /healthz, /api/engine/v1/* -> /v1/*) stays explicit and
+// (/api/health -> /healthz, /api/engine/api/* -> /api/*) stays explicit and
 // unit-testable (see test/client-core.test.js).
 const P = {
   health: enginePath('/api/health'),                 // /healthz
-  sessions: enginePath('/api/engine/v1/sessions'),   // /v1/sessions
-  runs: enginePath('/api/engine/v1/runs'),           // /v1/runs
+  sessions: enginePath('/api/engine/api/sessions'),  // /api/sessions
+  runs: enginePath('/api/engine/api/runs'),          // /api/runs
 }
 
 interface HealthzResponse {
@@ -286,7 +286,7 @@ async function fetchResponse(path: string, init: RequestInit = {}): Promise<Resp
   // The engine authorises with a bearer token; the Access cookie only covers this
   // origin. Health and the public auth paths answer without one, so their failure
   // to mint a token is not fatal — the request goes out either way.
-  if (!/^\/healthz(\?|$)/.test(path) && !path.startsWith('/v1/auth/')) {
+  if (!/^\/healthz(\?|$)/.test(path) && !path.startsWith('/api/auth/')) {
     const token = await getEngineToken()
     if (token && !headers.Authorization) headers.Authorization = `Bearer ${token}`
   }
@@ -395,7 +395,7 @@ export const cancelEngineRun = (runId: string) =>
 
 // ---------------------------------------------------------------- devices
 // The engine owns the device/MCP gateway routes directly. Every call carries
-// the same short-lived Bearer token as the rest of /v1/*. An empty registry
+// the same short-lived Bearer token as the rest of /api/*. An empty registry
 // comes back as { devices: [], note } with HTTP 200 — normalizeDevices keeps
 // the note so the UI can show a readable message instead of an error.
 async function deviceCall<T>(

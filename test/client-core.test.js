@@ -66,20 +66,20 @@ test('isExpired treats past and invalid expiries as expired', () => {
 test('enginePath maps legacy /api paths to direct engine paths', () => {
   assert.equal(enginePath('/api/health'), '/healthz')
   assert.equal(enginePath('/api/engine/status'), '/healthz')
-  assert.equal(enginePath('/api/engine/v1/sessions'), '/v1/sessions')
-  assert.equal(enginePath('/api/engine/v1/runs'), '/v1/runs')
-  assert.equal(enginePath('/api/engine/v1/runs/run_x/events'), '/v1/runs/run_x/events')
+  assert.equal(enginePath('/api/engine/api/sessions'), '/api/sessions')
+  assert.equal(enginePath('/api/engine/api/runs'), '/api/runs')
+  assert.equal(enginePath('/api/engine/api/runs/run_x/events'), '/api/runs/run_x/events')
   // The engine no longer issues tokens: Cloudflare Access does, so the old
   // /api/auth/token mapping is gone and the path passes through unchanged.
   assert.equal(enginePath('/api/auth/token'), '/api/auth/token')
 })
 
 test('DEVICE_PATHS point at the real engine endpoints and encode ids', () => {
-  assert.equal(DEVICE_PATHS.list, '/v1/devices')
-  assert.equal(DEVICE_PATHS.tools('redroid14'), '/v1/devices/redroid14/tools')
-  assert.equal(DEVICE_PATHS.action('redroid14'), '/v1/devices/redroid14/action')
-  assert.equal(DEVICE_PATHS.tools('a b/c'), '/v1/devices/a%20b%2Fc/tools')
-  assert.equal(DEVICE_PATHS.action('a b/c'), '/v1/devices/a%20b%2Fc/action')
+  assert.equal(DEVICE_PATHS.list, '/api/devices')
+  assert.equal(DEVICE_PATHS.tools('redroid14'), '/api/devices/redroid14/tools')
+  assert.equal(DEVICE_PATHS.action('redroid14'), '/api/devices/redroid14/action')
+  assert.equal(DEVICE_PATHS.tools('a b/c'), '/api/devices/a%20b%2Fc/tools')
+  assert.equal(DEVICE_PATHS.action('a b/c'), '/api/devices/a%20b%2Fc/action')
 })
 
 // ---------------------------------------------------------------- engineCall (mock fetch)
@@ -91,7 +91,7 @@ test('engineCall relies on the Access cookie: no Authorization header is built h
   assert.equal(result.status, 200)
   assert.deepEqual(result.data, { tools: [{ name: 'tap' }] })
   const call = fetchFn.calls[0]
-  assert.equal(call.url, 'https://engine.test/v1/devices/dev-1/tools')
+  assert.equal(call.url, 'https://engine.test/api/devices/dev-1/tools')
   assert.equal(call.init.method, 'GET')
   assert.equal(call.init.headers['Authorization'], undefined)
   // Cloudflare Access authorises from the cookie, so it must be sent.
@@ -131,7 +131,7 @@ test('engineCall surfaces the engine error code and message on a non-2xx', async
 
 // ---------------------------------------------------------------- device normalizers
 
-test('GET /v1/devices -> engineCall + normalizeDevices maps the engine list', async () => {
+test('GET /api/devices -> engineCall + normalizeDevices maps the engine list', async () => {
   const checkedAt = '2026-11-10T00:00:00Z'
   const devices = [
     { id: 'dev-a', name: 'dev-a', host: 'https://mcp/dev-a', status: { online: true, checkedAt, reason: null, version: '1.4', latencyMs: null } },
@@ -182,7 +182,7 @@ test('normalizeDevice tolerates snake_case latency and missing fields', () => {
   assert.equal(d.status.version, null)
 })
 
-test('GET /v1/devices/{id}/tools -> engineCall + normalizeDeviceTools', async () => {
+test('GET /api/devices/{id}/tools -> engineCall + normalizeDeviceTools', async () => {
   const body = { tools: [
     { name: 'tap', description: 'Tap the screen', inputSchema: { type: 'object', properties: { x: { type: 'number' } } } },
     { name: 'screenshot' },
@@ -199,7 +199,7 @@ test('GET /v1/devices/{id}/tools -> engineCall + normalizeDeviceTools', async ()
   assert.equal(normalized.tools[1].name, 'screenshot')
 })
 
-test('POST /v1/devices/{id}/action -> engineCall + normalizeDeviceAction', async () => {
+test('POST /api/devices/{id}/action -> engineCall + normalizeDeviceAction', async () => {
   const body = { ok: true, device: 'dev-1', tool: 'screenshot', text: '', screenshot: { mimeType: 'image/png', data: 'AAA' }, at: '2026-11-10T00:00:00Z' }
   const fetchFn = createFetch([jsonResponse(body)])
   const result = await engineCall(fetchFn, 'https://engine.test', DEVICE_PATHS.action('dev-1'), { method: 'POST', body: { tool: 'screenshot', arguments: {} } })
