@@ -31,6 +31,8 @@ const ENGINE = 'https://engine.aixodia.dpdns.org'
  */
 const AUTH_PREFIXES = ['/auth/']
 /** Paths the engine answers and that this proxy may reach. */
+// No /terminal here: that is a WebSocket upgrade, and a Pages Function cannot
+// proxy one — the engine is dialled directly for it.
 const ENGINE_PREFIXES = ['/api/', '/healthz', '/cdn-cgi/']
 
 function upstreamFor(path) {
