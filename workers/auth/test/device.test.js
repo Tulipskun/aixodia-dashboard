@@ -90,10 +90,9 @@ function setup({ secret = 'sync-secret' } = {}) {
   db.exec(SCHEMA)
   return {
     DB: new D1Mini(db),
-    AUTH_SYNC_SECRET: secret,
     ENGINE_URL: '', // no push in tests; sync state stays 'pending'
     PUBLIC_URL: 'https://aixodia.dpdns.org',
-    CONFIG: { get: async () => '' },
+    CONFIG: { get: async (key) => key === 'auth/sync_secret' ? secret : '' },
     AUTH_ALLOWED_EMAILS: approverEmail,
   }
 }
