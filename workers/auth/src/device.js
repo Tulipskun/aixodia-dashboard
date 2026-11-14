@@ -27,7 +27,7 @@
  * starting the sign-in over.
  */
 
-import { json, base64url, sha256Hex, now, hooks, allowlist, permits } from './shared.js'
+import { json, base64url, sha256Hex, now, hooks, allowlist, permits, syncSecret } from './shared.js'
 
 const DEVICE_CODE_TTL = 600          // seconds, the draft's 10 minutes
 const POLL_INTERVAL = 5              // seconds the app should wait between polls
@@ -64,8 +64,10 @@ function randomSecret() {
 /** A CSRF value the approve page can carry but an attacker cannot mint. */
 async function csrfFor(deviceCodeHash, env) {
   const data = new TextEncoder().encode(`approve:${deviceCodeHash}`)
+  const secret = await syncSecret(env)
+  if (!secret) throw new Error('required Workers KV key auth/sync_secret is missing')
   const key = await crypto.subtle.importKey(
-    'raw', new TextEncoder().encode(env.AUTH_SYNC_SECRET || ''),
+    'raw', new TextEncoder().encode(secret),
     { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
   )
   const mac = await crypto.subtle.sign('HMAC', key, data)
@@ -342,7 +344,7 @@ export async function revoke(env, req) {
  * Shared-secret guarded; answers hashes only.
  */
 export async function activeSessions(env, req) {
-  if (!syncSecretOk(env, req)) return json({ error: 'forbidden', code: 'BAD_SYNC_SECRET' }, 403)
+  if (!(await syncSecretOk(env, req))) return json({ error: 'forbidden', code: 'BAD_SYNC_SECRET' }, 403)
   const rows = await env.DB.prepare(
     `SELECT token_hash FROM auth_tokens WHERE state = 'active'`,
   ).all()
@@ -353,11 +355,13 @@ export async function activeSessions(env, req) {
 
 async function pushSync(env, body) {
   const target = env.ENGINE_URL
-  if (!target || !env.AUTH_SYNC_SECRET) return
+  if (!target) return
+  const secret = await syncSecret(env)
+  if (!secret) throw new Error('required Workers KV key auth/sync_secret is missing')
   try {
     const res = await fetch(`${target.replace(/\/$/, '')}/auth/sessions/sync`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-auth-sync': env.AUTH_SYNC_SECRET },
+      headers: { 'content-type': 'application/json', 'x-auth-sync': secret },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(5000),
     })
@@ -371,8 +375,8 @@ async function pushSync(env, body) {
   }
 }
 
-function syncSecretOk(env, req) {
-  const secret = env.AUTH_SYNC_SECRET || ''
+async function syncSecretOk(env, req) {
+  const secret = await syncSecret(env)
   return secret.length > 0 && req.headers.get('x-auth-sync') === secret
 }
 

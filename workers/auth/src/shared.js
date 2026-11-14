@@ -57,6 +57,17 @@ export async function allowlist(env) {
     .filter((entry) => entry.includes('@'))
 }
 
+
+/**
+ * The engine/Worker shared secret lives in AIXODIA_CONFIG, never in a checked-in
+ * vars block. Let KV read failures propagate so they cannot masquerade as a bad
+ * client credential or silently disable token synchronization.
+ */
+export async function syncSecret(env) {
+  const value = await env.CONFIG.get('auth/sync_secret')
+  return String(value || '').trim()
+}
+
 /** Case-insensitive membership test; an empty needle never matches. */
 export function permits(list, email) {
   const needle = String(email || '').trim().toLowerCase()

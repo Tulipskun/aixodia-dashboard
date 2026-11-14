@@ -32,11 +32,6 @@ AUTH_ALLOWED_EMAILS = ""
 # ACCESS_APP_AUD in KV stays the primary; this only widens what is accepted.
 ACCESS_ACCEPTED_AUDIENCES = "9cb93a11871fead4219e2a9f3f303cc17b9d809d426c26e208e8f1cf1c1a9bcf,1e2270863178234a46c4f3e1c91a4dc2558d6b428258e4b63ff365fea607cbbd"
 
-# Shared secret between this Worker and the engine for the token-sync endpoints
-# (GET /auth/sessions/active, and the pushes to the engine's /auth/sessions/sync).
-# Same value lives in the engine's systemd env as AUTH_SYNC_SECRET.
-AUTH_SYNC_SECRET = "28251b96da03268e45173938979af883b8c4c7a7d18b84cfa506e8ca6688ed36"
-
 # Where the engine's push target lives.
 ENGINE_URL = "https://engine.aixodia.dpdns.org"
 

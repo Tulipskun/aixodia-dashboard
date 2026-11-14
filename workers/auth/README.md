@@ -38,7 +38,9 @@ same key.
 ## Storage
 
 `AIXODIA_CONFIG` (KV) holds configuration (`auth/allowed_emails`,
-`access/team_domain`, `access/app_aud`). Sessions live in a separate namespace so
+`auth/sync_secret`, `access/team_domain`, `access/app_aud`). The sync secret
+is shared with the Engine and is read only from KV by both sides; it is not a
+Wrangler variable or a process environment value. Sessions live in a separate namespace so
 that a config write cannot collide with a live session, and so sessions can be
 given a TTL.
 
